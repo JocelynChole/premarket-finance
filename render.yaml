@@ -1,0 +1,24 @@
+# Render 部署配置 - 单 web service（自带 china-finance-rss 子进程）
+# 部署教程见 DEPLOY_RENDER.md
+
+services:
+  - type: web
+    name: premarket-finance
+    runtime: python
+    plan: free
+    # 启动顺序：pip 装依赖（gunicorn + flask + 全部 RSS 依赖）
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && pip install -r china-finance-rss/requirements.txt
+    # gunicorn 监听 Render 分配的 $PORT 端口
+    # --timeout 120 给 RSS 抓取足够时间（默认 30 秒对长抓取不够）
+    # --workers 1 免费 tier 单实例足够，RSS 子进程也只启一份
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --access-logfile - --error-logfile -
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: RSS_PORT
+        value: 8053
+      # 容器内 RSS_BASE_URL 默认就是 http://localhost:8053，无需覆盖
+      - key: WEB_CONCURRENCY
+        value: 1
+    healthCheckPath: /api/news

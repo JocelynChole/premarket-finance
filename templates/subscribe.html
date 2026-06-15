@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>订阅中心 · {{ project_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="/">
+        <span class="brand__mark">P</span>
+        <span class="brand__text">
+          <span class="brand__name">盘前速览</span>
+          <span class="brand__edition">Premarket Dispatch · v{{ project_version }}</span>
+        </span>
+      </a>
+      <nav class="nav">
+        <a href="/">速览</a>
+        <a href="/report">简报</a>
+        <a href="/sectors">板块</a>
+        <a href="/history">档案</a>
+        <a href="/subscribe" class="is-active">订阅</a>
+      </nav>
+      <div class="clock">
+        <span class="clock__dot"></span>
+        <span id="liveClock">--:--:--</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="subscribe-hero">
+      <h1 class="subscribe-hero__title">每天 <em>9:25</em><br>开盘前 5 分钟</h1>
+      <p class="subscribe-hero__sub">订阅后，盘前简报将自动推送到您的个人微信。<br>使用 <strong>Server酱</strong> 免费通道，零成本、零门槛。</p>
+    </section>
+
+    <section class="section" style="border-top: 1px solid var(--rule); padding-top: var(--gap-xl);">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-2xl);" id="layoutGrid">
+        <!-- 左：表单 -->
+        <div>
+          <div class="section__head">
+            <div class="section__head-left">
+              <span class="section__no">§01</span>
+              <h2 class="section__title" style="font-size: 24px;">新增 <em>订阅</em></h2>
+            </div>
+          </div>
+
+          <div id="flash"></div>
+
+          <form class="form" id="subForm">
+            <div class="field">
+              <label class="field__label">电子邮箱 *</label>
+              <input class="field__input" type="email" id="email" required placeholder="you@example.com">
+              <span class="field__hint">用于订阅管理，不会用于推送</span>
+            </div>
+
+            <div class="field">
+              <label class="field__label">Server酱 SendKey（强烈推荐）</label>
+              <input class="field__input" type="text" id="sendkey" placeholder="SCTxxxxx...">
+              <span class="field__hint">
+                获取方式：访问 <a href="https://sct.ftqq.com/" target="_blank">sct.ftqq.com</a> → 微信扫码登录 → 复制 SendKey。<br>
+                <span style="color: var(--gold);">免费版每天 5 条，盘前 1 条完全够用。</span>
+              </span>
+              <button type="button" class="btn btn--ghost btn--sm" id="btnTestPush" style="align-self: flex-start; margin-top: 6px;">📱 发送测试消息</button>
+            </div>
+
+            <div class="field">
+              <label class="field__label">关注板块（不选则接收全部）</label>
+              <div class="sector-grid" id="sectorGrid">
+                <label><input type="checkbox" value="半导体/芯片"><span>半导体/芯片</span></label>
+                <label><input type="checkbox" value="新能源"><span>新能源</span></label>
+                <label><input type="checkbox" value="人工智能"><span>人工智能</span></label>
+                <label><input type="checkbox" value="机器人"><span>机器人</span></label>
+                <label><input type="checkbox" value="金融"><span>金融</span></label>
+                <label><input type="checkbox" value="房地产"><span>房地产</span></label>
+                <label><input type="checkbox" value="汽车"><span>汽车</span></label>
+                <label><input type="checkbox" value="医药"><span>医药</span></label>
+                <label><input type="checkbox" value="消费"><span>消费</span></label>
+                <label><input type="checkbox" value="基建"><span>基建</span></label>
+                <label><input type="checkbox" value="军工"><span>军工</span></label>
+                <label><input type="checkbox" value="周期"><span>周期</span></label>
+                <label><input type="checkbox" value="科技"><span>科技</span></label>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: var(--gap-md);">
+              <button type="submit" class="btn">✅ 立即订阅</button>
+              <button type="button" class="btn btn--ghost" id="btnPushAll">📤 立即推送给所有订阅者</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- 右：订阅列表 -->
+        <div>
+          <div class="section__head">
+            <div class="section__head-left">
+              <span class="section__no">§02</span>
+              <h2 class="section__title" style="font-size: 24px;">当前 <em>订阅</em></h2>
+            </div>
+            <button class="btn btn--ghost btn--sm" id="btnReloadSubs">↻ 刷新</button>
+          </div>
+          <div id="subList">
+            <div class="loading"><div class="spinner"></div><div>加载中…</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot shell">
+    <div class="foot__brand">PREMARKET DISPATCH · {{ project_version }}</div>
+    <div class="foot__links">
+      <a href="/">返回速览</a> ·
+      <span style="color: var(--ink-3);">不构成投资建议</span>
+    </div>
+  </footer>
+
+  <style>
+    @media (max-width: 900px) {
+      #layoutGrid { grid-template-columns: 1fr !important; }
+    }
+  </style>
+
+  <script>
+    function pad(n){return n.toString().padStart(2,'0');}
+    function tick(){
+      const n=new Date();
+      document.getElementById('liveClock').textContent=`${pad(n.getHours())}:${pad(n.getMinutes())}:${pad(n.getSeconds())}`;
+    }
+    setInterval(tick,1000); tick();
+  </script>
+  <script>
+    const flash = (msg, ok = true) => {
+      const c = document.getElementById('flash');
+      c.innerHTML = `<div class="flash ${ok ? 'flash--ok' : 'flash--err'}">${msg}</div>`;
+      setTimeout(() => c.innerHTML = '', 5000);
+    };
+
+    document.getElementById('subForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      const sendkey = document.getElementById('sendkey').value.trim();
+      const sectors = Array.from(document.querySelectorAll('#sectorGrid input:checked')).map(i => i.value);
+      if (!email) { flash('请填写邮箱', false); return; }
+      try {
+        const resp = await fetch('/api/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, serverchan_key: sendkey, sectors })
+        });
+        const data = await resp.json();
+        if (data.success) {
+          flash(data.message, true);
+          document.getElementById('subForm').reset();
+          loadSubs();
+        } else { flash(data.error || '订阅失败', false); }
+      } catch (e) { flash('订阅失败：' + e.message, false); }
+    });
+
+    document.getElementById('btnTestPush').addEventListener('click', async () => {
+      const key = document.getElementById('sendkey').value.trim();
+      if (!key) { flash('请先填写 SendKey', false); return; }
+      flash('正在发送测试…', true);
+      try {
+        const resp = await fetch('/api/send/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serverchan_key: key })
+        });
+        const data = await resp.json();
+        flash(data.success ? '✅ 测试消息已发送，请检查微信' : (data.message || '发送失败'), data.success);
+      } catch (e) { flash('发送失败：' + e.message, false); }
+    });
+
+    document.getElementById('btnPushAll').addEventListener('click', async () => {
+      flash('正在推送给所有订阅者…', true);
+      try {
+        const resp = await fetch('/api/send/all', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+          flash(`✅ 推送完成：成功 ${data.success_count} / 失败 ${data.failed_count}`, true);
+        } else { flash(data.error || '推送失败', false); }
+      } catch (e) { flash('推送失败：' + e.message, false); }
+    });
+
+    document.getElementById('btnReloadSubs').addEventListener('click', loadSubs);
+
+    async function loadSubs() {
+      const c = document.getElementById('subList');
+      c.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      try {
+        const resp = await fetch('/api/subscribers');
+        const subs = await resp.json();
+        if (!subs.length) {
+          c.innerHTML = '<div class="empty"><span class="empty__icon">∅</span><div class="empty__title">暂无订阅者</div><div class="empty__sub">完成订阅后这里会显示订阅列表</div></div>';
+          return;
+        }
+        c.innerHTML = '<div class="subs">' + subs.map(s => `
+          <div class="sub">
+            <div class="sub__info">
+              <span class="sub__email">${s.email}</span>
+              <span class="sub__meta">${s.sectors && s.sectors.length ? s.sectors.join(' · ') : '全部板块'} · ${s.subscribed_at ? s.subscribed_at.substring(0, 10) : ''}</span>
+            </div>
+            <div class="sub__actions">
+              <span class="tag ${s.serverchan_key ? 'tag--bull' : 'tag--ghost'}">${s.serverchan_key ? '✓ 微信' : '无 SendKey'}</span>
+              <button class="btn btn--ghost btn--sm" onclick="unsubscribe(${s.id})">取消</button>
+            </div>
+          </div>
+        `).join('') + '</div>';
+      } catch (e) {
+        c.innerHTML = `<div class="empty"><span class="empty__icon">!</span><div class="empty__title">加载失败</div><div class="empty__sub">${e.message}</div></div>`;
+      }
+    }
+
+    async function unsubscribe(id) {
+      if (!confirm('确定取消订阅？')) return;
+      try {
+        const resp = await fetch(`/api/subscribe/${id}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) { flash('已取消订阅', true); loadSubs(); }
+        else flash('操作失败', false);
+      } catch (e) { flash('操作失败：' + e.message, false); }
+    }
+
+    loadSubs();
+  </script>
+</body>
+</html>

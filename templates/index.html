@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ project_name }} · 今日速览</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+</head>
+<body>
+  <!-- ============ Top Bar ============ -->
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="/">
+        <span class="brand__mark">P</span>
+        <span class="brand__text">
+          <span class="brand__name">盘前速览</span>
+          <span class="brand__edition">Premarket Dispatch · v{{ project_version }}</span>
+        </span>
+      </a>
+      <nav class="nav">
+        <a href="/" class="is-active">速览</a>
+        <a href="/report">简报</a>
+        <a href="/sectors">板块</a>
+        <a href="/history">档案</a>
+        <a href="/subscribe">订阅</a>
+      </nav>
+      <div class="clock">
+        <span class="clock__dot"></span>
+        <span id="liveClock">--:--:--</span>
+        <span id="liveDate">--</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <!-- ============ Hero ============ -->
+    <section class="hero">
+      <div class="hero__kicker">PREMARKET DISPATCH · T-1 15:00 → T 09:30</div>
+      <h1 class="hero__title">
+        盘前 <em>速览</em>
+        <br>
+        <span id="heroDate" style="font-size: 0.4em; font-weight: 400; color: var(--ink-2); letter-spacing: 0.05em; display: block; margin-top: 16px;">--</span>
+      </h1>
+      <p class="hero__sub">
+        自动从 <strong>财联社</strong> · <strong>东方财富</strong> · <strong>同花顺</strong> 抓取
+        <strong>前一交易日 15:00 → 今日 09:30</strong> 之间的预测类资讯，
+        自动识别影响板块，输出 <strong>可读的结构化简报</strong>。
+      </p>
+      <div class="hero__meta">
+        <span>每日抓取 {{ scheduled_time }}</span>
+        <span>微信推送 {{ push_time }}</span>
+        <span>仅显示自变量（预测类）</span>
+      </div>
+
+      <!-- 倒计时 -->
+      <div class="countdown" id="countdown">
+        <div class="countdown__label">
+          <span class="countdown__label-eyebrow">Countdown · T-1 15:00 → T 09:30</span>
+          <span class="countdown__label-main" id="cdLabel">距今日开盘还有</span>
+        </div>
+        <div class="countdown__timer">
+          <div class="countdown__unit"><div class="countdown__num" id="cdH">--</div><div class="countdown__name">时</div></div>
+          <div class="countdown__unit"><div class="countdown__num" id="cdM">--</div><div class="countdown__name">分</div></div>
+          <div class="countdown__unit"><div class="countdown__num" id="cdS">--</div><div class="countdown__name">秒</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Stats ============ -->
+    <section class="stats" id="statsRow">
+      <div class="stat">
+        <div class="stat__label">预测类资讯</div>
+        <div class="stat__value stat__value--gold" id="statCount">0</div>
+        <div class="stat__caption" id="statSubtitle">点击「刷新」开始抓取</div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">涉及板块</div>
+        <div class="stat__value" id="statSectors">0</div>
+        <div class="stat__caption" id="statSectorList">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">整体情绪</div>
+        <div class="stat__value" id="statSentiment">—</div>
+        <div class="stat__caption" id="statSentimentSub">基于利好/利空比例</div>
+      </div>
+      <div class="stat">
+        <div class="stat__label">更新于</div>
+        <div class="stat__value" id="statTime" style="font-size: 24px;">—</div>
+        <div class="stat__caption">
+          <button class="btn btn--ghost btn--sm" id="btnRefresh">↻ 立即刷新</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Heatmap ============ -->
+    <section class="section">
+      <div class="section__head">
+        <div class="section__head-left">
+          <span class="section__no">§01</span>
+          <h2 class="section__title">板块 <em>热度图</em></h2>
+        </div>
+        <p class="section__sub">点击任一板块卡片，下方资讯流自动筛选</p>
+      </div>
+      <div class="heatmap" id="heatmap">
+        <div class="empty" style="grid-column: 1 / -1;">暂无数据</div>
+      </div>
+    </section>
+
+    <!-- ============ News List ============ -->
+    <section class="section">
+      <div class="section__head">
+        <div class="section__head-left">
+          <span class="section__no">§02</span>
+          <h2 class="section__title">预测类 <em>资讯</em></h2>
+        </div>
+        <p class="section__sub">仅显示机构研判 / 行情预测 / 热点推演 / 后市分析</p>
+      </div>
+
+      <div class="filterbar">
+        <div class="filterbar__group">
+          <span class="filterbar__label">日期</span>
+          <button class="pill is-active" data-date="all">全部</button>
+          <button class="pill" data-date="yesterday">前一日</button>
+          <button class="pill" data-date="today">当日</button>
+        </div>
+        <div class="filterbar__group">
+          <span class="filterbar__label">情绪</span>
+          <button class="pill is-active" data-sentiment="all">全部</button>
+          <button class="pill" data-sentiment="利好">📈 利好</button>
+          <button class="pill" data-sentiment="利空">📉 利空</button>
+        </div>
+        <div class="filterbar__group">
+          <span class="filterbar__label">重要度</span>
+          <button class="pill is-active" data-min-imp="0">不限</button>
+          <button class="pill" data-min-imp="6">≥ 6</button>
+          <button class="pill" data-min-imp="8">≥ 8</button>
+        </div>
+        <div class="search">
+          <input type="text" id="searchInput" placeholder="搜索标题 / 内容关键词…">
+        </div>
+      </div>
+
+      <div class="news-grid" id="newsGrid">
+        <div class="loading"><div class="spinner"></div><div>正在加载今日资讯…</div></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ Footer ============ -->
+  <footer class="foot shell">
+    <div class="foot__brand">PREMARKET DISPATCH · {{ project_version }}</div>
+    <div class="foot__links">
+      <a href="/report">完整简报</a> ·
+      <a href="/subscribe">微信订阅</a> ·
+      <a href="https://sct.ftqq.com/" target="_blank">Server酱</a> ·
+      <span style="color: var(--ink-3);">不构成投资建议</span>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
