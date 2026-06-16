@@ -6,7 +6,7 @@
 import re
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Tuple
 import sys
 import json
@@ -294,7 +294,7 @@ def fetch_and_filter_news() -> List[Dict]:
     raw_data_file = REPORTS_DIR / f"raw_news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     with open(raw_data_file, 'w', encoding='utf-8') as f:
         json.dump({
-            "fetched_at": datetime.now().isoformat(),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
             "total_count": len(all_news),
             "filtered_count": len(filtered_news),
             "news_list": filtered_news

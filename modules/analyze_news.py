@@ -5,7 +5,7 @@
 """
 import re
 from typing import List, Dict, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 # 添加项目根目录到路径
 import sys
@@ -442,7 +442,7 @@ def analyze_single_news(news: Dict) -> Dict:
         "sentiment": sentiment,
         "summary": summary,
         "advice": advice,
-        "analyzed_at": datetime.now().isoformat()
+        "analyzed_at": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -484,7 +484,7 @@ def analyze_news_list(news_list: List[Dict]) -> Dict:
     analyzed_news.sort(key=lambda x: x["importance_score"], reverse=True)
 
     return {
-        "analyzed_at": datetime.now().isoformat(),
+        "analyzed_at": datetime.now(timezone.utc).isoformat(),
         "news_list": analyzed_news,
         "stats": stats
     }

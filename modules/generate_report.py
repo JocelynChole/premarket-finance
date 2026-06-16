@@ -3,7 +3,7 @@
 盘前财经资讯助手 - 简报生成模块
 按照 output_spec.md 的格式生成结构化 Markdown 简报
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict
 from collections import Counter
 import sys
@@ -247,7 +247,7 @@ def generate_and_save_report(analyzed_result: Dict, date_str: str = None) -> Dic
         "report_path": filepath,
         "report_content": markdown,
         "news_count": len(analyzed_news),
-        "generated_at": datetime.now().isoformat()
+        "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
 
