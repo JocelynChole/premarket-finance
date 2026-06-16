@@ -41,3 +41,7 @@ Thumbs.db
 # 涓存椂鏂囦欢
 *.tmp
 *.bak
+ 
+# 自用文件（不推到仓库）
+_test_tz.py
+premarket-live/
