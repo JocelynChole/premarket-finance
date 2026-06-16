@@ -33,6 +33,9 @@ from modules.fetch_news import fetch_and_filter_news
 from modules.analyze_news import analyze_news_list
 from modules.generate_report import generate_and_save_report
 from modules.send_wechat import send_news_report, test_serverchan, send_to_subscribers
+from scheduler import job_pipeline, job_push
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # ============== Flask 初始化 ==============
 app = Flask(
@@ -101,6 +104,50 @@ def _ensure_rss_running():
 
 # 模块加载时立即尝试启动 RSS（gunicorn / python app.py 都会触发）
 _ensure_rss_running()
+
+
+# ============== APScheduler 定时任务（Render 单进程跑用） ==============
+
+_scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+
+
+def _start_scheduler():
+    """启动 APScheduler（gunicorn 主进程 + 本地 Flask 都会触发）
+
+    - 用途：线上 Render 没有 Windows 任务计划，靠 gunicorn 进程内挂后台线程调度
+    - 时区：强制 Asia/Shanghai（不受 Render 服务器 UTC 影响）
+    - 防重入：gunicorn 多个 worker 会重复 import，但 BackgroundScheduler 默认是单例
+    """
+    if _scheduler.running:
+        return
+
+    from config import SCHEDULED_TIME, PUSH_TIME
+    sh, sm = SCHEDULED_TIME.split(":")
+    ph, pm = PUSH_TIME.split(":")
+
+    _scheduler.add_job(
+        job_pipeline,
+        CronTrigger(hour=int(sh), minute=int(sm), timezone="Asia/Shanghai"),
+        id="fetch_pipeline",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _scheduler.add_job(
+        job_push,
+        CronTrigger(hour=int(ph), minute=int(pm), timezone="Asia/Shanghai"),
+        id="push_wechat",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _scheduler.start()
+    print(f"[SCHEDULER] APScheduler 已启动（时区 Asia/Shanghai）")
+    print(f"  · {SCHEDULED_TIME}  抓取 + 分析 + 生成简报")
+    print(f"  · {PUSH_TIME}  推送微信")
+
+
+_start_scheduler()
 
 
 # ============== 辅助函数 ==============

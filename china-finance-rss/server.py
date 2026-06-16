@@ -130,8 +130,12 @@ def handle_eastmoney_kuaixun():
     for item in result.get('LivesList', []):
         showtime = item.get('showtime', '')
         try:
-            dt = datetime.strptime(showtime, '%Y-%m-%d %H:%M:%S')
-            pubdate = formatdate(timeval=dt.timestamp(), localtime=False, usegmt=True)
+            # 东方财富的 showtime 是北京时间（naive 字符串）
+            # 显式标注为 +08:00 时区，避免 dt.timestamp() 在不同时区环境下产生不同结果
+            dt = datetime.strptime(showtime, '%Y-%m-%d %H:%M:%S').replace(
+                tzinfo=timezone(timedelta(hours=8))
+            )
+            pubdate = format_datetime(dt)
         except Exception:
             pubdate = formatdate()
 

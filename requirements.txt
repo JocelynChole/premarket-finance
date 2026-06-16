@@ -10,8 +10,9 @@ gunicorn>=21.0.0
 # HTTP 请求 + RSS 抓取
 requests>=2.28.0
 
-# 定时任务
+# 定时任务（Render 进程内调度用）
 schedule>=1.1.0
+apscheduler>=3.10.0
 
 # 自动加载 .env 文件（可选）
 python-dotenv>=0.19.0

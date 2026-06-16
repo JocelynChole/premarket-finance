@@ -78,11 +78,21 @@ def job_pipeline():
 
 
 def job_push():
-    """读取今日报告并推送给所有活跃订阅者"""
+    """读取今日报告并推送给所有活跃订阅者
+
+    关键改进：推送前先重新抓取一次最新资讯
+    原因：08:30 抓取后到 09:25 推送之间的 55 分钟内会有新资讯，
+          否则推送给微信的是过时数据，错过开盘前最新预测
+    """
     print("\n" + "=" * 60)
-    print(f"📱 [{datetime.now():%Y-%m-%d %H:%M:%S}] 开始推送微信")
+    print(f"📱 [{datetime.now():%Y-%m-%d %H:%M:%S}] 开始推送微信（推送前重新抓取）")
     print("=" * 60)
 
+    # 推送前重新抓一次（抓失败也不中断，继续用 8:30 的旧数据推送）
+    print("🔄 推送前重新抓取最新资讯...")
+    job_pipeline()
+
+    # 读取最新报告
     today = datetime.now().strftime('%Y%m%d')
     report_file = REPORTS_DIR / f"report_{today}.json"
     if not report_file.exists():

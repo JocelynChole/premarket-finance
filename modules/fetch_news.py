@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Tuple
 import sys
 import json
 
-# 添加项目根目录到路径
+# 模块顶部
 sys.path.insert(0, str(__file__).rsplit('/', 2)[0] if '/' in __file__ else str(__file__).rsplit('\\', 2)[0])
 from config import REPORTS_DIR
 
@@ -28,43 +28,50 @@ RSS_ENDPOINTS = {
 # 中文星期映射
 WEEKDAY_CN = {0: "周一", 1: "周二", 2: "周三", 3: "周四", 4: "周五", 5: "周六", 6: "周日"}
 
+# 北京时区（+8）
+CST = timezone(timedelta(hours=8))
+
 # 支持的时间格式（按优先级匹配）
+# 备注：%z 可以同时识别 +0800 和 +08:00 两种格式
 TIME_FORMATS = [
     "%Y-%m-%d %H:%M:%S",
     "%Y-%m-%d %H:%M",
     "%Y/%m/%d %H:%M:%S",
     "%Y/%m/%d %H:%M",
-    "%a, %d %b %Y %H:%M:%S GMT",   # RFC 822 格式（带 GMT）
-    "%a, %d %b %Y %H:%M:%S",        # RFC 822 格式（无时区）
+    "%a, %d %b %Y %H:%M:%S %z",   # 带时区偏移（如 +0800 / +08:00 / +0000）
+    "%a, %d %b %Y %H:%M:%S GMT",  # RFC 822 格式（带 GMT 字面量 = UTC）
+    "%a, %d %b %Y %H:%M:%S",      # RFC 822 格式（无时区）
     "%d %b %Y %H:%M:%S",
-    "%a, %d %b %Y %H:%M:%S %z",     # 带时区偏移
 ]
 
 
 def parse_pub_time(pub_time_str: str) -> Optional[datetime]:
     """
-    解析 RSS 时间字符串为 datetime 对象
+    解析 RSS 时间字符串为带时区的 datetime 对象（aware datetime，UTC 时区）
     - 自动识别 RFC 822、ISO 8601 等常见格式
-    - GMT 时间自动转换为北京时间（+8 小时）
+    - 无时区标记的，假定为北京时间（+08:00）
+    - 带其他时区标记的（GMT / +0000 / +08:00 等），自动转换
     - 解析失败返回 None
     """
     if not pub_time_str or not isinstance(pub_time_str, str):
         return None
 
     text = pub_time_str.strip()
-    # 处理中文时区字串
+    # 清洗时区字串
     text = text.replace("GMT+0800", "+0800").replace("CST", "").strip()
+    # "GMT" 字面量 = UTC：把字面 GMT 替换成 +0000，让 %z 识别
+    # 例: "Tue, 16 Jun 2026 10:36:00 GMT" → "Tue, 16 Jun 2026 10:36:00 +0000"
+    import re as _re
+    text = _re.sub(r'\s+GMT\s*$', ' +0000', text)
 
     for fmt in TIME_FORMATS:
         try:
             dt = datetime.strptime(text, fmt)
-            # GMT 时间 → 北京时间（+8 小时）
-            if 'GMT' in pub_time_str or 'gmt' in pub_time_str.lower():
-                dt = dt + timedelta(hours=8)
-            # 含 +0800 时区 → 视为北京时间
-            elif '+0800' in pub_time_str or '+0800' in pub_time_str:
-                pass  # 已经是 +8 时区，不转换
-            return dt
+            if dt.tzinfo is None:
+                # 无时区标记 → 假定为北京时间（中国财经资讯源基本都用北京时间）
+                dt = dt.replace(tzinfo=CST)
+            # 统一返回 UTC（aware datetime）
+            return dt.astimezone(timezone.utc)
         except ValueError:
             continue
 
@@ -73,19 +80,19 @@ def parse_pub_time(pub_time_str: str) -> Optional[datetime]:
 
 def extract_time_fields(pub_time_str: str) -> Dict:
     """
-    从原始时间字符串提取 4 个独立字段，统一存到 news dict 里
+    从原始时间字符串提取 4 个独立字段，统一按北京时间显示
 
     返回字段：
-      - pub_time       原始字符串（保留）
-      - pub_datetime   ISO 格式 "2026-06-10T15:30:00"
-      - pub_date       日期 "2026-06-10"
-      - pub_time_of_day 时分 "15:30"
-      - pub_weekday    中文星期 "周三"
-      - pub_display    友好显示 "2026-06-10 15:30 周三"
-      - pub_timestamp  Unix 时间戳（用于排序）
+      - pub_time        原始字符串（保留）
+      - pub_datetime    ISO 格式（带 +08:00 后缀，便于前端识别时区）
+      - pub_date        北京时间日期 "2026-06-16"
+      - pub_time_of_day 北京时间时分 "18:36"
+      - pub_weekday     中文星期 "周三"
+      - pub_display     友好显示 "2026-06-16 18:36 周三"
+      - pub_timestamp   Unix 时间戳（用于排序）
     """
-    dt = parse_pub_time(pub_time_str)
-    if dt is None:
+    dt_utc = parse_pub_time(pub_time_str)
+    if dt_utc is None:
         return {
             "pub_time": pub_time_str or "",
             "pub_datetime": "",
@@ -96,14 +103,16 @@ def extract_time_fields(pub_time_str: str) -> Dict:
             "pub_timestamp": 0,
         }
 
+    # 转北京时间生成显示字段
+    dt_cst = dt_utc.astimezone(CST)
     return {
         "pub_time": pub_time_str or "",
-        "pub_datetime": dt.strftime("%Y-%m-%dT%H:%M:%S"),
-        "pub_date": dt.strftime("%Y-%m-%d"),
-        "pub_time_of_day": dt.strftime("%H:%M"),
-        "pub_weekday": WEEKDAY_CN.get(dt.weekday(), ""),
-        "pub_display": f"{dt.strftime('%Y-%m-%d %H:%M')} {WEEKDAY_CN.get(dt.weekday(), '')}",
-        "pub_timestamp": int(dt.timestamp()),
+        "pub_datetime": dt_cst.isoformat(),
+        "pub_date": dt_cst.strftime("%Y-%m-%d"),
+        "pub_time_of_day": dt_cst.strftime("%H:%M"),
+        "pub_weekday": WEEKDAY_CN.get(dt_cst.weekday(), ""),
+        "pub_display": f"{dt_cst.strftime('%Y-%m-%d %H:%M')} {WEEKDAY_CN.get(dt_cst.weekday(), '')}",
+        "pub_timestamp": int(dt_utc.timestamp()),
     }
 
 
@@ -227,28 +236,37 @@ def get_next_trading_day(date: datetime.date) -> datetime.date:
 def is_within_trading_window(pub_time_str: str) -> bool:
     """判断发布时间是否在交易时间窗口内
 
-    核心逻辑：上一个交易日收盘(15:00) → 下一个交易日开盘(09:30)
+    核心逻辑：上一个交易日收盘(15:00 北京时间) → 下一个交易日开盘(09:30 北京时间)
     如果当前已过开盘时间，延长到当前时间方便查看
+
+    所有时间统一用北京时区（aware datetime）做比较，避免时区混用报错
     """
-    pub_time = parse_pub_time(pub_time_str)
-    if pub_time is None:
+    pub_time_utc = parse_pub_time(pub_time_str)
+    if pub_time_utc is None:
         return True  # 解析失败默认放行（避免误杀）
 
-    now = datetime.now()
-    today = now.date()
-    last_trading_day = get_last_trading_day(today)
-    next_trading_day = get_next_trading_day(today)
+    # 统一转北京时区
+    pub_time_cst = pub_time_utc.astimezone(CST)
+    now_cst = datetime.now(CST)
+    today_cst = now_cst.date()
+    last_trading_day = get_last_trading_day(today_cst)
+    next_trading_day = get_next_trading_day(today_cst)
 
-    # 起始：上一个交易日 15:00
-    window_start = datetime.combine(last_trading_day, datetime.strptime("15:00:00", "%H:%M:%S").time())
+    # 起始：上一个交易日 15:00（北京时间，aware）
+    window_start = datetime.combine(
+        last_trading_day,
+        datetime.strptime("15:00:00", "%H:%M:%S").time()
+    ).replace(tzinfo=CST)
 
-    # 结束：下一个交易日 09:30
-    # 但如果已过这个时间，延长到当前时间（方便随时查看）
-    window_end = datetime.combine(next_trading_day, datetime.strptime("09:30:00", "%H:%M:%S").time())
-    if now > window_end:
-        window_end = now
+    # 结束：下一个交易日 09:30（北京时间，aware）
+    window_end = datetime.combine(
+        next_trading_day,
+        datetime.strptime("09:30:00", "%H:%M:%S").time()
+    ).replace(tzinfo=CST)
+    if now_cst > window_end:
+        window_end = now_cst
 
-    return window_start <= pub_time <= window_end
+    return window_start <= pub_time_cst <= window_end
 
 
 def fetch_and_filter_news() -> List[Dict]:
