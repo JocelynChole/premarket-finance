@@ -3,11 +3,14 @@
 盘前财经资讯助手 - 简报生成模块
 按照 output_spec.md 的格式生成结构化 Markdown 简报
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict
 from collections import Counter
 import sys
 import json
+
+# 北京时区
+CST = timezone(timedelta(hours=8))
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(__file__).rsplit('/', 2)[0] if '/' in __file__ else str(__file__).rsplit('\\', 2)[0])
