@@ -117,22 +117,17 @@ def _start_scheduler():
     - 用途：线上 Render 没有 Windows 任务计划，靠 gunicorn 进程内挂后台线程调度
     - 时区：强制 Asia/Shanghai（不受 Render 服务器 UTC 影响）
     - 防重入：gunicorn 多个 worker 会重复 import，但 BackgroundScheduler 默认是单例
+
+    设计原则：只保留 9:25 自动推送，8:30 任务已去掉
+    - 9:25 之前没数据是正常的（用户需要主动刷新或订阅推送触发）
+    - 避免 8:30 任务在 Render 休眠时失效导致"假阴性"
     """
     if _scheduler.running:
         return
 
-    from config import SCHEDULED_TIME, PUSH_TIME
-    sh, sm = SCHEDULED_TIME.split(":")
+    from config import PUSH_TIME
     ph, pm = PUSH_TIME.split(":")
 
-    _scheduler.add_job(
-        job_pipeline,
-        CronTrigger(hour=int(sh), minute=int(sm), timezone="Asia/Shanghai"),
-        id="fetch_pipeline",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
     _scheduler.add_job(
         job_push,
         CronTrigger(hour=int(ph), minute=int(pm), timezone="Asia/Shanghai"),
@@ -143,8 +138,8 @@ def _start_scheduler():
     )
     _scheduler.start()
     print(f"[SCHEDULER] APScheduler 已启动（时区 Asia/Shanghai）")
-    print(f"  · {SCHEDULED_TIME}  抓取 + 分析 + 生成简报")
-    print(f"  · {PUSH_TIME}  推送微信")
+    print(f"  · {PUSH_TIME}  推送微信（提前重抓一次确保资讯最新）")
+    print(f"  · 其他时段：用户点击刷新 + 已订阅时，推送至该用户")
 
 
 _start_scheduler()
@@ -187,8 +182,13 @@ def _save_report(payload):
     return f
 
 
-def _run_full_pipeline(silent: bool = False):
-    """执行完整抓取-分析-生成流程，返回 dict 结果（不直接返回 jsonify）"""
+def _run_full_pipeline(silent: bool = False, push_to_all: bool = False):
+    """执行完整抓取-分析-生成流程，返回 dict 结果（不直接返回 jsonify）
+
+    Args:
+        silent:       是否静默（不打印日志）
+        push_to_all:  是否推送给所有订阅者（默认 False，由调用方按需推）
+    """
     if not silent:
         print("=" * 60)
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 开始执行完整流程")
@@ -212,14 +212,16 @@ def _run_full_pipeline(silent: bool = False):
     if not silent:
         print(f"✅ 简报已生成：{report_info['report_path']}")
 
-    # 推送
-    subscribers = _load_subscribers()
-    active = [s for s in subscribers if s.get("active", True)]
-    push_summary = {"total": 0, "success": 0, "failed": 0}
-    if active and active[0].get("serverchan_key"):
-        push_summary = send_to_subscribers(active, analyzed["news_list"])
-        if not silent:
-            print(f"✅ 推送完成：{push_summary['success']}/{push_summary['total']}")
+    # 默认不推送；只有显式 push_to_all=True 才推给所有订阅者
+    push_summary = None
+    if push_to_all:
+        subscribers = _load_subscribers()
+        active = [s for s in subscribers if s.get("active", True)]
+        push_summary = {"total": 0, "success": 0, "failed": 0}
+        if active and active[0].get("serverchan_key"):
+            push_summary = send_to_subscribers(active, analyzed["news_list"])
+            if not silent:
+                print(f"✅ 全量推送完成：{push_summary['success']}/{push_summary['total']}")
 
     return {
         "success": True,
@@ -295,7 +297,26 @@ def api_news():
 
 @app.route('/api/refresh', methods=['POST'])
 def api_refresh():
-    result = _run_full_pipeline(silent=True)
+    """手动刷新：跑完整抓取流程（不自动推送给所有订阅者）
+
+    可选行为：如果请求 body 带了 sendkey，则额外推送给该用户
+    - 设计目的：用户订阅后点击刷新 → 微信收到当日资讯
+    - 普通用户（未带 sendkey）刷新：只更新页面，不推送
+    """
+    data = request.json or {}
+    user_sendkey = (data.get("sendkey") or "").strip()
+
+    result = _run_full_pipeline(silent=True, push_to_all=False)
+
+    # 如果该用户已订阅（带 sendkey），额外推给他一次
+    if user_sendkey and result.get("success"):
+        try:
+            from modules.send_wechat import send_news_report
+            personal_push = send_news_report(user_sendkey, result.get("news_list", []))
+            result["personal_push"] = personal_push
+        except Exception as e:
+            result["personal_push"] = {"success": False, "message": f"推送异常: {e}"}
+
     return jsonify(result)
 
 

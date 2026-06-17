@@ -45,3 +45,4 @@ Thumbs.db
 # 自用文件（不推到仓库）
 _test_tz.py
 premarket-live/
+_test_scheduler2.py

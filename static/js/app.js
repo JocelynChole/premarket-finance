@@ -75,11 +75,26 @@ async function refreshNews() {
   grid.innerHTML = `<div class="loading"><div class="spinner"></div><div>正在抓取并分析财经资讯…</div></div>`;
   heat.innerHTML = `<div class="loading" style="grid-column: 1/-1;"><div class="spinner"></div><div>计算板块热度…</div></div>`;
   try {
-    const resp = await fetch('/api/refresh', { method: 'POST' });
+    // 如果用户已订阅（localStorage 里有 sendkey），附带发到后端
+    // 后端会额外推送给该用户一次
+    const userSendkey = localStorage.getItem('pms_sendkey') || '';
+    const resp = await fetch('/api/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sendkey: userSendkey })
+    });
     const data = await resp.json();
     if (data.success) {
       state.allNews = data.news_list || [];
       renderAll(data);
+      // 提示用户：如果是订阅用户，微信会收到推送
+      if (userSendkey && data.personal_push) {
+        if (data.personal_push.success) {
+          flash('✅ 微信推送成功，请检查微信', true);
+        } else {
+          flash('微信推送失败：' + (data.personal_push.message || '未知错误'), false);
+        }
+      }
     } else {
       showEmpty(data.error || '刷新失败，请先启动 china-finance-rss 服务');
     }

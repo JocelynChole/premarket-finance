@@ -141,23 +141,30 @@
 
     document.getElementById('subForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const email = document.getElementById('email').value.trim();
-      const sendkey = document.getElementById('sendkey').value.trim();
-      const sectors = Array.from(document.querySelectorAll('#sectorGrid input:checked')).map(i => i.value);
-      if (!email) { flash('请填写邮箱', false); return; }
-      try {
-        const resp = await fetch('/api/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, serverchan_key: sendkey, sectors })
-        });
-        const data = await resp.json();
-        if (data.success) {
-          flash(data.message, true);
-          document.getElementById('subForm').reset();
-          loadSubs();
-        } else { flash(data.error || '订阅失败', false); }
-      } catch (e) { flash('订阅失败：' + e.message, false); }
+    const email = document.getElementById('email').value.trim();
+    const sendkey = document.getElementById('sendkey').value.trim();
+    const sectors = Array.from(document.querySelectorAll('#sectorGrid input:checked')).map(i => i.value);
+    if (!email) { flash('请填写邮箱', false); return; }
+    try {
+      const resp = await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, serverchan_key: sendkey, sectors })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        // 订阅成功后，把 sendkey 存到 localStorage
+        // 用途：用户点击首页"立即刷新"时，附带 sendkey 自动推送给该用户
+        if (sendkey) {
+          localStorage.setItem('pms_sendkey', sendkey);
+        } else {
+          localStorage.removeItem('pms_sendkey');
+        }
+        flash(data.message, true);
+        document.getElementById('subForm').reset();
+        loadSubs();
+      } else { flash(data.error || '订阅失败', false); }
+    } catch (e) { flash('订阅失败：' + e.message, false); }
     });
 
     document.getElementById('btnTestPush').addEventListener('click', async () => {
