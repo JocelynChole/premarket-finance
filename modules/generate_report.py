@@ -22,13 +22,13 @@ def generate_report_title(date_str: str = None) -> str:
 
 
 def generate_time_range() -> str:
-    """生成时间范围说明"""
-    today = datetime.now().strftime('%Y-%m-%d')
+    """生成时间范围说明（生成时间按北京时区显示）"""
+    today = datetime.now(CST).strftime('%Y-%m-%d')
     return f"""### 📅 时间范围
 
 - **起始**：前一交易日 15:00:00
 - **截止**：本交易日 09:30:00
-- **生成时间**：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+- **生成时间**：{datetime.now(CST).strftime('%Y-%m-%d %H:%M:%S')}"""
 
 
 def generate_core_prediction(analyzed_news: List[Dict]) -> str:
