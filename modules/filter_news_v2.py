@@ -15,6 +15,7 @@
 
 import re
 from typing import Dict, List, Tuple
+from difflib import SequenceMatcher
 
 
 # ============================================================
@@ -333,25 +334,29 @@ def filter_by_quality(news_list: List[Dict]) -> List[Dict]:
 
 
 def calculate_similarity(str1: str, str2: str) -> float:
-    """计算两个字符串的相似度（0-1）"""
+    """计算两个字符串的相似度（0-1）
+
+    使用 difflib.SequenceMatcher 算法（最长公共子序列）
+    - 比"位置完全相同字符数"更鲁棒
+    - 能识别漏字、增字的同事件标题（如"筹建" vs "加紧筹建"）
+
+    测试案例：
+        "中国正在加紧筹建世界人工智能合作组织" (20字)
+        "中国正在筹建世界人工智能合作组织" (18字)
+        → 0.95（超过 0.75 阈值）
+    """
     if not str1 or not str2:
         return 0.0
 
+    # 清洗：只保留中文/字母/数字
     s1 = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', str1)
     s2 = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', str2)
 
     if not s1 or not s2:
         return 0.0
 
-    len1, len2 = len(s1), len(s2)
-    if len1 == 0 or len2 == 0:
-        return 0.0
-
-    min_len = min(len1, len2)
-    max_len = max(len1, len2)
-    match_count = sum(1 for i in range(min_len) if s1[i] == s2[i])
-    similarity = match_count / max_len
-    return similarity
+    # SequenceMatcher.ratio() = 2.0 * LCS / (len(s1) + len(s2))
+    return SequenceMatcher(None, s1, s2).ratio()
 
 
 def analyze_news_v2(news: Dict) -> Dict:
