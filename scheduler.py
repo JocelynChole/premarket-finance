@@ -14,7 +14,6 @@ import sys
 import os
 import time
 import json
-import schedule
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -188,6 +187,10 @@ def main():
         print("🚀 立即执行模式（抓取 + 推送）\n")
         job_full()
         return
+
+    # schedule 库懒加载：仅本地 `python scheduler.py` 独立运行时需要
+    # Render 部署用 APScheduler（app.py 内），不需要这个库
+    import schedule
 
     # 注册定时任务
     schedule.every().day.at(SCHEDULED_TIME).do(job_pipeline)
