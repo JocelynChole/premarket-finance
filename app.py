@@ -125,6 +125,17 @@ _ensure_rss_running()
 _scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
 
+def _self_ping():
+    """自 ping 保活，防止 Render 免费层 15 分钟休眠"""
+    try:
+        url = os.getenv("RENDER_EXTERNAL_URL", f"http://localhost:{FLASK_PORT}")
+        r = requests.get(url, timeout=10)
+        status = '成功' if r.status_code == 200 else f'HTTP {r.status_code}'
+        print(f"[PING] {datetime.now(CST):%H:%M:%S} 自 ping {status}")
+    except Exception as e:
+        print(f"[PING] 自 ping 失败: {e}")
+
+
 def _start_scheduler():
     """启动 APScheduler（gunicorn 主进程 + 本地 Flask 都会触发）
 
@@ -279,17 +290,6 @@ def _log_push(email: str, sendkey: str, sectors: list, news_count: int, success:
     # 同步到 GitHub（防 Render 重启丢失）
     if PERSISTENCE_ENABLED:
         save_json_to_github("data/push_log.json", log)
-
-
-def _self_ping():
-    """自 ping 保活，防止 Render 免费层 15 分钟休眠"""
-    try:
-        url = os.getenv("RENDER_EXTERNAL_URL", f"http://localhost:{FLASK_PORT}")
-        r = requests.get(url, timeout=10)
-        status = '成功' if r.status_code == 200 else f'HTTP {r.status_code}'
-        print(f"[PING] {datetime.now(CST):%H:%M:%S} 自 ping {status}")
-    except Exception as e:
-        print(f"[PING] 自 ping 失败: {e}")
 
 
 def _run_full_pipeline(silent: bool = False, push_to_all: bool = False):
