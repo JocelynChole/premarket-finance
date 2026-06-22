@@ -21,4 +21,4 @@ services:
       # 容器内 RSS_BASE_URL 默认就是 http://localhost:8053，无需覆盖
       - key: WEB_CONCURRENCY
         value: 1
-    healthCheckPath: /api/news
+    healthCheckPath: /healthz

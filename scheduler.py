@@ -15,8 +15,11 @@ import os
 import time
 import json
 import schedule
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# 北京时区
+CST = timezone(timedelta(hours=8))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -44,7 +47,7 @@ def load_subscribers():
 
 
 def save_today_report(payload: dict) -> Path:
-    today = datetime.now().strftime('%Y%m%d')
+    today = datetime.now(CST).strftime('%Y%m%d')
     f = REPORTS_DIR / f"report_{today}.json"
     with open(f, 'w', encoding='utf-8') as fp:
         json.dump(payload, fp, ensure_ascii=False, indent=2)
@@ -56,7 +59,7 @@ def save_today_report(payload: dict) -> Path:
 def job_pipeline():
     """完整抓取-分析-生成-保存流程（不推送，推送由独立 job 负责）"""
     print("\n" + "=" * 60)
-    print(f"📥 [{datetime.now():%Y-%m-%d %H:%M:%S}] 开始抓取-分析-生成")
+    print(f"📥 [{datetime.now(CST):%Y-%m-%d %H:%M:%S}] 开始抓取-分析-生成")
     print("=" * 60)
     try:
         news = fetch_and_filter_news()
@@ -85,7 +88,7 @@ def job_push():
           否则推送给微信的是过时数据，错过开盘前最新预测
     """
     print("\n" + "=" * 60)
-    print(f"📱 [{datetime.now():%Y-%m-%d %H:%M:%S}] 开始推送微信（推送前重新抓取）")
+    print(f"📱 [{datetime.now(CST):%Y-%m-%d %H:%M:%S}] 开始推送微信（推送前重新抓取）")
     print("=" * 60)
 
     # 推送前重新抓一次（抓失败也不中断，继续用 8:30 的旧数据推送）
@@ -93,7 +96,7 @@ def job_push():
     job_pipeline()
 
     # 读取最新报告
-    today = datetime.now().strftime('%Y%m%d')
+    today = datetime.now(CST).strftime('%Y%m%d')
     report_file = REPORTS_DIR / f"report_{today}.json"
     if not report_file.exists():
         print(f"⚠️ 今日报告不存在：{report_file}，请确认 {SCHEDULED_TIME} 的抓取任务是否已执行")
@@ -109,6 +112,44 @@ def job_push():
         return
 
     result = send_to_subscribers(active, analyzed.get('news_list', []))
+
+    # 记录推送日志（令牌方案：历史页展示用户推送记录）
+    push_log_file = DATA_DIR / "push_log.json"
+    log = []
+    if push_log_file.exists():
+        try:
+            with open(push_log_file, 'r', encoding='utf-8') as f:
+                log = json.load(f)
+        except Exception:
+            log = []
+    for sub in active:
+        # 通过 email 匹配推送结果（而非索引，避免顺序错位）
+        detail = None
+        for d in result.get('details', []):
+            if d.get('email') == sub.get('email', ''):
+                detail = d
+                break
+        success = detail.get('result', {}).get('success', False) if detail else False
+        log.append({
+            "date": today,
+            "timestamp": datetime.now(CST).isoformat(),
+            "email": sub.get('email', ''),
+            "sendkey": sub['serverchan_key'],
+            "sectors": sub.get('sectors') or [],
+            "news_count": len(analyzed.get('news_list', [])),
+            "success": success,
+        })
+    log = log[-500:]
+    with open(push_log_file, 'w', encoding='utf-8') as f:
+        json.dump(log, f, ensure_ascii=False, indent=2)
+    # 同步到 GitHub（防 Render 重启丢失）
+    try:
+        from modules.persistence import PERSISTENCE_ENABLED, save_json_to_github
+        if PERSISTENCE_ENABLED:
+            save_json_to_github("data/push_log.json", log)
+    except Exception:
+        pass
+
     print(f"✅ 推送完成：成功 {result['success']} / 失败 {result['failed']} / 总计 {result['total']}")
     return result
 

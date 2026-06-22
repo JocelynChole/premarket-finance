@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>板块推演 · {{ project_name }}</title>
+  <meta name="description" content="按板块归类今日预测类资讯，识别机构共识与情绪倾向">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 </head>
@@ -62,6 +63,7 @@
     setInterval(tick,1000); tick();
   </script>
   <script>
+    function escapeHtml(s){if(s==null)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
     async function loadSectors() {
       const c = document.getElementById('sectorGrid');
       try {
@@ -88,15 +90,15 @@
           const bearish = list.filter(n => n.sentiment === '利空').length;
           const direction = bullish > bearish ? '利好' : bearish > bullish ? '利空' : '中性';
           const dColor = direction === '利好' ? 'var(--bull)' : direction === '利空' ? 'var(--bear)' : 'var(--neutral)';
-          const topNews = list.slice(0, 3);
+          const topNews = list.filter(n => n.title).slice(0, 3);
           return `
             <div class="sector-card" style="--sector-color: ${palette[i % palette.length]};">
-              <div class="sector-card__name">${sector}</div>
+              <div class="sector-card__name">${escapeHtml(sector)}</div>
               <div class="sector-card__count">${list.length}</div>
               <div class="sector-card__sub" style="color: ${dColor};">${direction} · 利好${bullish} / 利空${bearish}</div>
-              <ul class="sector-card__news no-bullets">
-                ${topNews.map(n => `<li>· ${n.title.substring(0, 24)}${n.title.length > 24 ? '…' : ''}</li>`).join('')}
-              </ul>
+              ${topNews.length > 0 ? `<ul class="sector-card__news no-bullets">
+                ${topNews.map(n => `<li>· ${escapeHtml(n.title.substring(0, 24))}${n.title.length > 24 ? '…' : ''}</li>`).join('')}
+              </ul>` : ''}
             </div>
           `;
         }).join('');

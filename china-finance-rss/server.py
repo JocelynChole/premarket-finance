@@ -24,9 +24,9 @@ import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from time import time
-from email.utils import formatdate
+from email.utils import formatdate, format_datetime
 
 # Configuration via environment variables
 PORT = int(os.getenv('PORT', '8053'))

@@ -9,11 +9,14 @@ Server酱：https://sct.ftqq.com/
 
 import requests
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 API_BASE = "https://sctapi.ftqq.com"
 TIMEOUT = 10
+CST = timezone(timedelta(hours=8))
 
 
 def send_serverchan(token: str, title: str, content: str, channel: int = 9) -> Dict:
@@ -32,12 +35,18 @@ def send_serverchan(token: str, title: str, content: str, channel: int = 9) -> D
     if not token:
         return {"success": False, "message": "SendKey 不能为空"}
 
+    if not re.match(r'^SCT[a-zA-Z0-9]+$', token):
+        return {"success": False, "message": "SendKey 格式无效"}
+
     url = f"{API_BASE}/{token}.send"
     payload = {"title": title, "content": content, "channel": channel}
 
     try:
         response = requests.post(url, json=payload, timeout=TIMEOUT)
-        result = response.json()
+        try:
+            result = response.json()
+        except (json.JSONDecodeError, ValueError):
+            return {"success": False, "message": f"Server酱返回非JSON响应 (HTTP {response.status_code})"}
         if result.get("code") == 0:
             return {
                 "success": True,
@@ -58,7 +67,7 @@ def send_serverchan(token: str, title: str, content: str, channel: int = 9) -> D
 
 def test_serverchan(token: str) -> Dict:
     """测试 Server酱 推送通道"""
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now(CST).strftime('%Y-%m-%d %H:%M:%S')
     content = f"""**✅ 盘前资讯 · Server酱 测试成功**
 
 这是一条来自「盘前财经资讯研判智能体」的测试消息。
@@ -117,7 +126,7 @@ def send_news_report(token: str, news_list: List[Dict],
     )[:8]
 
     # 组装 Markdown 内容（企业微信/Server酱均支持）
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+    now_str = datetime.now(CST).strftime('%Y-%m-%d %H:%M')
     lines = []
     lines.append(f"# 📊 盘前速览 · {now_str}")
     lines.append("")
@@ -143,7 +152,8 @@ def send_news_report(token: str, news_list: List[Dict],
         importance = news.get("importance_score", 0)
         advice = news.get("advice", "")
         source = news.get("source", "")
-        pub_time = news.get("pub_time", "")[:16] if news.get("pub_time") else ""
+        pub_time_raw = news.get("pub_time", "") or ""
+        pub_time = pub_time_raw[:16] if len(pub_time_raw) >= 16 else pub_time_raw
 
         lines.append(f"### {i}. {title}")
         lines.append(f"> {emoji} **{sentiment}** · ⭐ {importance}分 · {sectors}")
@@ -160,7 +170,10 @@ def send_news_report(token: str, news_list: List[Dict],
     lines.append(f"📈 盘前财经资讯研判智能体 · {now_str}")
 
     content = "\n".join(lines)
-    title = f"📊 盘前速览 {datetime.now().strftime('%m月%d日')} · {len(news_list)}条"
+    # Server酱 内容限制 32KB
+    if len(content) > 30000:
+        content = content[:30000] + "\n\n...(内容过长已截断)"
+    title = f"📊 盘前速览 {datetime.now(CST).strftime('%m月%d日')} · {len(news_list)}条"
     return send_serverchan(token, title, content)
 
 
@@ -171,21 +184,23 @@ def send_to_subscribers(subscribers: List[Dict], news_list: List[Dict]) -> Dict:
     Returns:
         dict: {"total": int, "success": int, "failed": int, "details": list}
     """
-    results = []
-    for sub in subscribers:
+    def _push_one(sub):
         if not sub.get("active", True):
-            continue
+            return None
         token = sub.get("serverchan_key", "").strip()
         if not token:
-            continue
-
+            return None
         user_sectors = sub.get("sectors") or None
         result = send_news_report(token, news_list, user_sectors)
+        return {"email": sub.get("email", ""), "result": result}
 
-        results.append({
-            "email": sub.get("email", ""),
-            "result": result,
-        })
+    results = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(_push_one, sub) for sub in subscribers]
+        for f in as_completed(futures):
+            r = f.result()
+            if r:
+                results.append(r)
 
     success = sum(1 for r in results if r["result"].get("success"))
     failed = len(results) - success

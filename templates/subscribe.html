@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>订阅中心 · {{ project_name }}</title>
+  <meta name="description" content="订阅盘前财经资讯研判智能体，每天 9:25 自动推送盘前简报到微信">
+  <meta property="og:title" content="订阅中心 · 盘前财经资讯研判智能体">
+  <meta property="og:description" content="每天 9:25 开盘前 5 分钟，盘前简报自动推送到您的个人微信">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 </head>
@@ -53,13 +56,13 @@
           <form class="form" id="subForm">
             <div class="field">
               <label class="field__label">电子邮箱 *</label>
-              <input class="field__input" type="email" id="email" required placeholder="you@example.com">
+              <input class="field__input" type="email" id="email" required placeholder="you@example.com" autocomplete="email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+">
               <span class="field__hint">用于订阅管理，不会用于推送</span>
             </div>
 
             <div class="field">
               <label class="field__label">Server酱 SendKey（强烈推荐）</label>
-              <input class="field__input" type="text" id="sendkey" placeholder="SCTxxxxx...">
+              <input class="field__input" type="password" id="sendkey" placeholder="SCTxxxxx..." autocomplete="off">
               <span class="field__hint">
                 获取方式：访问 <a href="https://sct.ftqq.com/" target="_blank">sct.ftqq.com</a> → 微信扫码登录 → 复制 SendKey。<br>
                 <span style="color: var(--gold);">免费版每天 5 条，盘前 1 条完全够用。</span>
@@ -124,6 +127,15 @@
     }
   </style>
 
+  <div id="toastContainer" style="position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; max-width: 360px;"></div>
+
+  <style>
+    @keyframes toastIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateX(40px); } }
+    .toast-item { animation: toastIn 0.3s ease; }
+    .toast-item.removing { animation: toastOut 0.3s ease forwards; }
+  </style>
+
   <script>
     function pad(n){return n.toString().padStart(2,'0');}
     function tick(){
@@ -134,17 +146,29 @@
   </script>
   <script>
     const flash = (msg, ok = true) => {
-      const c = document.getElementById('flash');
-      c.innerHTML = `<div class="flash ${ok ? 'flash--ok' : 'flash--err'}">${msg}</div>`;
-      setTimeout(() => c.innerHTML = '', 5000);
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `flash ${ok ? 'flash--ok' : 'flash--err'} toast-item`;
+      toast.style.cssText = 'position: relative; min-width: 280px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
+      toast.innerHTML = msg;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.add('removing');
+        setTimeout(() => toast.remove(), 300);
+      }, 4000);
     };
 
     document.getElementById('subForm').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳ 提交中…';
+
     const email = document.getElementById('email').value.trim();
     const sendkey = document.getElementById('sendkey').value.trim();
     const sectors = Array.from(document.querySelectorAll('#sectorGrid input:checked')).map(i => i.value);
-    if (!email) { flash('请填写邮箱', false); return; }
+    if (!email) { flash('请填写邮箱', false); btn.disabled = false; btn.textContent = originalText; return; }
     try {
       const resp = await fetch('/api/subscribe', {
         method: 'POST',
@@ -165,11 +189,15 @@
         loadSubs();
       } else { flash(data.error || '订阅失败', false); }
     } catch (e) { flash('订阅失败：' + e.message, false); }
+    finally { btn.disabled = false; btn.textContent = originalText; }
     });
 
     document.getElementById('btnTestPush').addEventListener('click', async () => {
       const key = document.getElementById('sendkey').value.trim();
       if (!key) { flash('请先填写 SendKey', false); return; }
+      const btn = document.getElementById('btnTestPush');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = '⏳ 发送中…';
       flash('正在发送测试…', true);
       try {
         const resp = await fetch('/api/send/test', {
@@ -180,9 +208,13 @@
         const data = await resp.json();
         flash(data.success ? '✅ 测试消息已发送，请检查微信' : (data.message || '发送失败'), data.success);
       } catch (e) { flash('发送失败：' + e.message, false); }
+      finally { btn.disabled = false; btn.textContent = orig; }
     });
 
     document.getElementById('btnPushAll').addEventListener('click', async () => {
+      const btn = document.getElementById('btnPushAll');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = '⏳ 推送中…';
       flash('正在推送给所有订阅者…', true);
       try {
         const resp = await fetch('/api/send/all', { method: 'POST' });
@@ -191,6 +223,7 @@
           flash(`✅ 推送完成：成功 ${data.success_count} / 失败 ${data.failed_count}`, true);
         } else { flash(data.error || '推送失败', false); }
       } catch (e) { flash('推送失败：' + e.message, false); }
+      finally { btn.disabled = false; btn.textContent = orig; }
     });
 
     document.getElementById('btnReloadSubs').addEventListener('click', loadSubs);
@@ -212,7 +245,7 @@
               <span class="sub__meta">${s.sectors && s.sectors.length ? s.sectors.join(' · ') : '全部板块'} · ${s.subscribed_at ? s.subscribed_at.substring(0, 10) : ''}</span>
             </div>
             <div class="sub__actions">
-              <span class="tag ${s.serverchan_key ? 'tag--bull' : 'tag--ghost'}">${s.serverchan_key ? '✓ 微信' : '无 SendKey'}</span>
+              <span class="tag ${s.has_sendkey ? 'tag--bull' : 'tag--ghost'}">${s.has_sendkey ? '✓ 微信' : '无 SendKey'}</span>
               <button class="btn btn--ghost btn--sm" onclick="unsubscribe(${s.id})">取消</button>
             </div>
           </div>

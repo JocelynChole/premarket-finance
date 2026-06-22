@@ -96,7 +96,7 @@ CONTEXTUAL_CATEGORIES = {
 ALWAYS_EXCLUDE_PATTERNS = [
     # 港股/美股标的
     "港股", "恒指", "科指", "港股通",
-    "美团", "快手", "腾讯控股", "腾讯音乐", "拼多多", "金山云", "百度", "阿里", "京东",
+    "美团", "快手", "腾讯控股", "腾讯音乐", "拼多多", "金山云", "百度", "阿里巴巴", "阿里云", "京东",
     "永利澳门", "银河娱乐", "金沙中国", "澳博", "美高梅", "耐世特", "汇丰", "友邦",
     # 重复性价格预测
     "长江有色", "2日锡价", "2日锌价", "2日镍价", "2日铝价", "2日铜价",
@@ -231,7 +231,7 @@ def classify_sector_precise(text: str) -> List[str]:
     sectors = []
 
     # 科技类（细分）
-    if any(w in text for w in ["人工智能", "ai", "大模型", "算力", "chatgpt"]):
+    if any(w in text for w in ["人工智能", "大模型", "算力", "chatgpt"]) or re.search(r'\bai\b', text):
         sectors.append("人工智能")
     if any(w in text for w in ["半导体", "芯片", "光刻机", "晶圆", "封测", "国产替代"]):
         sectors.append("半导体/芯片")
@@ -251,7 +251,7 @@ def classify_sector_precise(text: str) -> List[str]:
         sectors.append("新能源汽车")
 
     # 周期类（细分）
-    if any(w in text for w in ["铜", "铝", "锌", "镍", "锡", "有色金属"]):
+    if any(w in text for w in ["铜", "铝", "锌", "镍", "锡价", "锡锭", "有色金属"]):
         sectors.append("有色金属")
     if any(w in text for w in ["钢铁", "铁矿石", "螺纹钢"]):
         sectors.append("钢铁")
@@ -322,7 +322,7 @@ def filter_by_quality(news_list: List[Dict]) -> List[Dict]:
         is_duplicate = False
         for seen in seen_titles:
             similarity = calculate_similarity(title, seen)
-            if similarity > 0.9:
+            if similarity > 0.75:
                 is_duplicate = True
                 break
 
@@ -330,6 +330,10 @@ def filter_by_quality(news_list: List[Dict]) -> List[Dict]:
             filtered.append(news)
             seen_titles.append(title)
 
+    # 最多保留 50 条
+    MAX_NEWS = 50
+    if len(filtered) > MAX_NEWS:
+        filtered = filtered[:MAX_NEWS]
     return filtered
 
 
@@ -371,12 +375,21 @@ def analyze_news_v2(news: Dict) -> Dict:
     # 2. 精准匹配板块
     sectors = classify_sector_precise(text)
 
-    # 3. 情绪判断
+    # 3. 情绪判断（处理否定词）
     sentiment = "中性"
+    # 先检查否定词+利好词的组合
+    negation_words = ["不", "未", "没有", "难以", "难以"]
     if any(w in text for w in ['看好', '上涨', '突破', '机会', '利好', '超预期']):
-        sentiment = "利好"
+        # 检查是否被否定词修饰
+        if not any(neg + w in text for neg in negation_words for w in ['看好', '上涨', '突破', '机会', '利好', '超预期']):
+            sentiment = "利好"
+        else:
+            sentiment = "利空"
     elif any(w in text for w in ['看空', '下跌', '风险', '利空', '不及预期']):
-        sentiment = "利空"
+        if not any(neg + w in text for neg in negation_words for w in ['看空', '下跌', '风险', '利空', '不及预期']):
+            sentiment = "利空"
+        else:
+            sentiment = "利好"
 
     # 4. 生成决策建议
     advice = ""

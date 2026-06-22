@@ -7,7 +7,6 @@ const state = {
   filters: {
     sector: 'all',
     sentiment: 'all',
-    date: 'all',
     minImportance: 0,
     search: '',
   },
@@ -70,6 +69,12 @@ async function loadNews() {
 }
 
 async function refreshNews() {
+  const btn = document.getElementById('btnRefresh');
+  if (btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ 刷新中…';
+  }
   const grid = $('#newsGrid');
   const heat = $('#heatmap');
   grid.innerHTML = `<div class="loading"><div class="spinner"></div><div>正在抓取并分析财经资讯…</div></div>`;
@@ -100,6 +105,13 @@ async function refreshNews() {
     }
   } catch (err) {
     showEmpty('刷新失败：' + err.message);
+  } finally {
+    if (btn) {
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = '↻ 立即刷新';
+      }, 60000);
+    }
   }
 }
 
@@ -222,21 +234,10 @@ function renderHeatmap(data) {
 // ============== 资讯流 ==============
 
 function applyFilters() {
-  // 计算前一日/当日的日期字符串（与后端无关，仅前端过滤）
-  const now = new Date();
-  const padN = (n) => String(n).padStart(2, '0');
-  const todayStr    = `${now.getFullYear()}-${padN(now.getMonth() + 1)}-${padN(now.getDate())}`;
-  const yestDate    = new Date(now.getTime() - 24 * 3600 * 1000);
-  const yestStr     = `${yestDate.getFullYear()}-${padN(yestDate.getMonth() + 1)}-${padN(yestDate.getDate())}`;
-
   const filtered = state.allNews.filter(news => {
     if (state.filters.sector !== 'all' && !(news.sectors || []).includes(state.filters.sector)) return false;
     if (state.filters.sentiment !== 'all' && news.sentiment !== state.filters.sentiment) return false;
     if ((news.importance_score || 0) < state.filters.minImportance) return false;
-    if (state.filters.date !== 'all' && news.pub_date) {
-      if (state.filters.date === 'today'     && news.pub_date !== todayStr) return false;
-      if (state.filters.date === 'yesterday' && news.pub_date !== yestStr)  return false;
-    }
     if (state.filters.search) {
       const q = state.filters.search.toLowerCase();
       const text = `${news.title || ''} ${news.content || ''}`.toLowerCase();
@@ -264,9 +265,9 @@ function renderNews(newsList) {
                     : news.sentiment === '利空' ? 'news-card--bear'
                     : 'news-card--neutral';
     const sectorTags = (news.sectors || []).slice(0, 3).map(s =>
-      `<span class="tag tag--gold">${s}</span>`).join('');
+      `<span class="tag tag--gold">${escapeHtml(s)}</span>`).join('');
     const importance = news.importance_score || 0;
-    const filledBars = Math.min(10, Math.max(0, importance));
+    const filledBars = Math.min(10, Math.max(0, Math.round(importance)));
     const highBars = importance >= 8 ? 'is-high' : (importance < 4 ? 'is-low' : '');
     const bars = Array.from({ length: 10 }, (_, k) =>
       `<span class="score__bar ${k < filledBars ? 'score__bar--filled ' + highBars : ''}"></span>`
@@ -274,34 +275,36 @@ function renderNews(newsList) {
 
     // 使用新时间字段
     const tf = formatTimeFields(news);
-    const dateLabel = tf.date ? `<span class="news-card__date">${tf.date}</span> ` : '';
-    const timeLabel = tf.time ? `<span>${tf.time}</span>` : '<span>--</span>';
-    const weekdayLabel = tf.weekday ? `<span class="news-card__weekday">${tf.weekday}</span>` : '';
+    const dateLabel = tf.date ? `<span class="news-card__date">${escapeHtml(tf.date)}</span> ` : '';
+    const timeLabel = tf.time ? `<span>${escapeHtml(tf.time)}</span>` : '<span>--</span>';
+    const weekdayLabel = tf.weekday ? `<span class="news-card__weekday">${escapeHtml(tf.weekday)}</span>` : '';
+    const safeLink = safeUrl(news.link);
 
     return `
-      <article class="news-card ${sentClass}" data-date="${tf.date}">
+      <article class="news-card ${sentClass}" data-date="${escapeHtml(tf.date)}">
         <div class="news-card__meta">
           <span class="dot">●</span>
           ${dateLabel}
           ${timeLabel}
           ${weekdayLabel}
           <span>·</span>
-          <span>${news.source || ''}</span>
+          <span>${escapeHtml(news.source || '')}</span>
           <span style="margin-left: auto;" class="score">
             <span class="score__bars">${bars}</span>
             <span>${importance}/10</span>
           </span>
         </div>
         <h3 class="news-card__title">${escapeHtml(news.title || '')}</h3>
-        <div class="news-card__tags">
-          ${sectorTags}
-          ${news.news_type ? `<span class="tag tag--ghost">${news.news_type}</span>` : ''}
-          ${news.var_type && news.var_type !== '既定事实' && news.var_type !== '非A股' ? `<span class="tag tag--ghost">${news.var_type}</span>` : ''}
-        </div>
+        ${(() => {
+          const tagsContent = sectorTags
+            + (news.news_type ? `<span class="tag tag--ghost">${escapeHtml(news.news_type)}</span>` : '')
+            + (news.var_type && news.var_type !== '既定事实' && news.var_type !== '非A股' ? `<span class="tag tag--ghost">${escapeHtml(news.var_type)}</span>` : '');
+          return tagsContent.trim() ? `<div class="news-card__tags">${tagsContent}</div>` : '';
+        })()}
         <p class="news-card__summary">${escapeHtml(truncate(news.content || news.summary || '', 220))}</p>
         <div class="news-card__footer">
-          <span class="news-card__advice">${news.advice || news.sentiment || '—'}</span>
-          ${news.link ? `<a class="news-card__link" href="${news.link}" target="_blank" rel="noopener">查看原文</a>` : ''}
+          <span class="news-card__advice">${escapeHtml(news.advice || news.sentiment || '—')}</span>
+          ${safeLink ? `<a class="news-card__link" href="${safeLink}" target="_blank" rel="noopener">查看原文</a>` : ''}
         </div>
       </article>
     `;
@@ -354,7 +357,13 @@ function escapeHtml(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeUrl(url) {
+  if (!url) return '';
+  return /^https?:\/\//i.test(url) ? url : '';
 }
 
 // ============== 事件绑定 ==============
@@ -366,15 +375,6 @@ $$('.pill[data-sentiment]').forEach(btn => {
     $$('.pill[data-sentiment]').forEach(b => b.classList.remove('is-active'));
     btn.classList.add('is-active');
     state.filters.sentiment = btn.dataset.sentiment;
-    applyFilters();
-  });
-});
-
-$$('.pill[data-date]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    $$('.pill[data-date]').forEach(b => b.classList.remove('is-active'));
-    btn.classList.add('is-active');
-    state.filters.date = btn.dataset.date;
     applyFilters();
   });
 });

@@ -5,18 +5,27 @@
 """
 import re
 import requests
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Tuple
 import sys
 import json
+from difflib import SequenceMatcher
+
+# XML 解析：优先使用 defusedxml 防御 XXE，不可用则回退到标准库
+try:
+    from defusedxml import ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET
 
 # 模块顶部
 sys.path.insert(0, str(__file__).rsplit('/', 2)[0] if '/' in __file__ else str(__file__).rsplit('\\', 2)[0])
 from config import REPORTS_DIR
 
-# china-finance-rss 服务地址
-RSS_BASE_URL = "http://localhost:8053"
+# china-finance-rss 服务地址（优先从 config 读取，失败则 fallback）
+try:
+    from config import RSS_BASE_URL
+except ImportError:
+    RSS_BASE_URL = "http://localhost:8053"
 
 # RSS 端点配置
 RSS_ENDPOINTS = {
@@ -58,7 +67,7 @@ def parse_pub_time(pub_time_str: str) -> Optional[datetime]:
 
     text = pub_time_str.strip()
     # 清洗时区字串
-    text = text.replace("GMT+0800", "+0800").replace("CST", "").strip()
+    text = text.replace("GMT+0800", "+0800").replace("CST", "+0800").strip()
     # "GMT" 字面量 = UTC：把字面 GMT 替换成 +0000，让 %z 识别
     # 例: "Tue, 16 Jun 2026 10:36:00 GMT" → "Tue, 16 Jun 2026 10:36:00 +0000"
     import re as _re
@@ -156,7 +165,11 @@ def fetch_from_rss(source_name: str, url: str, timeout: int = 15) -> List[Dict]:
     """从 china-finance-rss 服务获取指定来源的资讯"""
     try:
         print(f"正在抓取 {source_name}...")
-        response = requests.get(url, timeout=timeout)
+        response = requests.get(
+            url,
+            timeout=timeout,
+            headers={'User-Agent': 'PremarketFinance/1.0 (RSS Reader)'},
+        )
         response.encoding = 'utf-8'
 
         if response.status_code != 200:
@@ -217,20 +230,45 @@ def fetch_all_news() -> List[Dict]:
     return all_news
 
 
-def get_last_trading_day(date: datetime.date) -> datetime.date:
-    """获取上一个交易日（跳过周末）"""
-    prev_day = date - timedelta(days=1)
-    while prev_day.weekday() >= 5:  # 5=周六, 6=周日
-        prev_day -= timedelta(days=1)
-    return prev_day
+# 节假日支持：优先使用 chinese_calendar，不可用则回退到只跳周末
+try:
+    import chinese_calendar
 
+    def is_trading_day(date):
+        try:
+            return chinese_calendar.is_workday(date)
+        except NotImplementedError:
+            # chinese_calendar 库未覆盖该日期
+            return date.weekday() < 5
 
-def get_next_trading_day(date: datetime.date) -> datetime.date:
-    """获取下一个交易日（跳过周末）"""
-    next_day = date + timedelta(days=1)
-    while next_day.weekday() >= 5:  # 5=周六, 6=周日
-        next_day += timedelta(days=1)
-    return next_day
+    def get_last_trading_day(date: datetime.date) -> datetime.date:
+        """获取上一个交易日（跳过周末和法定节假日）"""
+        prev = date - timedelta(days=1)
+        while not is_trading_day(prev):
+            prev -= timedelta(days=1)
+        return prev
+
+    def get_next_trading_day(date: datetime.date) -> datetime.date:
+        """获取下一个交易日（跳过周末和法定节假日）"""
+        nxt = date + timedelta(days=1)
+        while not is_trading_day(nxt):
+            nxt += timedelta(days=1)
+        return nxt
+except ImportError:
+    # chinese_calendar 未安装，回退到只跳周末
+    def get_last_trading_day(date: datetime.date) -> datetime.date:
+        """获取上一个交易日（跳过周末）"""
+        prev = date - timedelta(days=1)
+        while prev.weekday() >= 5:
+            prev -= timedelta(days=1)
+        return prev
+
+    def get_next_trading_day(date: datetime.date) -> datetime.date:
+        """获取下一个交易日（跳过周末）"""
+        nxt = date + timedelta(days=1)
+        while nxt.weekday() >= 5:
+            nxt += timedelta(days=1)
+        return nxt
 
 
 def is_within_trading_window(pub_time_str: str) -> bool:
@@ -243,7 +281,8 @@ def is_within_trading_window(pub_time_str: str) -> bool:
     """
     pub_time_utc = parse_pub_time(pub_time_str)
     if pub_time_utc is None:
-        return True  # 解析失败默认放行（避免误杀）
+        print(f"  ⚠️ 时间解析失败，不放行: {pub_time_str!r}")
+        return False  # 解析失败不放行
 
     # 统一转北京时区
     pub_time_cst = pub_time_utc.astimezone(CST)
@@ -264,7 +303,12 @@ def is_within_trading_window(pub_time_str: str) -> bool:
         datetime.strptime("09:30:00", "%H:%M:%S").time()
     ).replace(tzinfo=CST)
     if now_cst > window_end:
-        window_end = now_cst
+        # 最多延长到当日 15:00，避免窗口无限扩大
+        cap = datetime.combine(
+            today_cst,
+            datetime.strptime("15:00:00", "%H:%M:%S").time()
+        ).replace(tzinfo=CST)
+        window_end = min(now_cst, cap)
 
     return window_start <= pub_time_cst <= window_end
 
@@ -272,7 +316,7 @@ def is_within_trading_window(pub_time_str: str) -> bool:
 def fetch_and_filter_news() -> List[Dict]:
     """抓取并过滤资讯，只保留交易时间窗口内的预测/观点类资讯"""
     print("=" * 60)
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始抓取财经资讯")
+    print(f"[{datetime.now(CST).strftime('%Y-%m-%d %H:%M:%S')}] 开始抓取财经资讯")
     print("=" * 60)
 
     all_news = fetch_all_news()
@@ -309,7 +353,7 @@ def fetch_and_filter_news() -> List[Dict]:
     filtered_news = fix_news_links(filtered_news)
 
     # 保存原始数据
-    raw_data_file = REPORTS_DIR / f"raw_news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    raw_data_file = REPORTS_DIR / f"raw_news_{datetime.now(CST).strftime('%Y%m%d_%H%M%S')}.json"
     with open(raw_data_file, 'w', encoding='utf-8') as f:
         json.dump({
             "fetched_at": datetime.now(timezone.utc).isoformat(),
@@ -320,6 +364,16 @@ def fetch_and_filter_news() -> List[Dict]:
 
     print(f"原始数据已保存至: {raw_data_file}")
 
+    # 清理 7 天前的 raw_news 文件
+    cutoff = datetime.now(CST) - timedelta(days=7)
+    for old_file in REPORTS_DIR.glob("raw_news_*.json"):
+        try:
+            file_time = datetime.fromtimestamp(old_file.stat().st_mtime, tz=CST)
+            if file_time < cutoff:
+                old_file.unlink()
+        except Exception:
+            pass
+
     return filtered_news
 
 
@@ -327,53 +381,34 @@ def remove_duplicates(news_list: List[Dict]) -> List[Dict]:
     """去除重复资讯
 
     根据标题相似度判断是否为重复资讯，保留第一条，去除后续相似的。
+    使用 difflib.SequenceMatcher 计算相似度（与 filter_news_v2.py 的 calculate_similarity 一致），
+    阈值 0.75。
     """
-    import re
-    
-    def extract_keywords_set(title):
-        """提取标题中的关键词集合（用于比较相似度）"""
-        # 移除标点符号，保留中文、英文、数字
-        clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', title)
-        # 过滤常见词
-        stop_words = {'商务部', '将在', '在', '对', '的', '含当日', '基础上', '现行适用'}
-        for w in stop_words:
-            clean = clean.replace(w, '')
-        # 返回清理后的字符串
-        return clean
-    
     if not news_list:
         return []
 
     unique_news = []
-    seen_keys = []
+    seen_titles = []
 
     for news in news_list:
         title = news.get('title', '').strip()
         if not title:
             continue
 
-        # 提取核心关键词
-        key = extract_keywords_set(title)
-        
-        # 检查是否与已保留的关键词相似
-        is_duplicate = False
-        for seen in seen_keys:
-            # 计算编辑距离相似度
-            if len(key) > 0 and len(seen) > 0:
-                # 简单比较：前30个字符相同度
-                min_len = min(len(key), len(seen), 30)
-                if key[:min_len] == seen[:min_len]:
-                    is_duplicate = True
-                    break
-                # 或者80%以上字符相同
-                common = sum(1 for a, b in zip(key, seen) if a == b)
-                if min(len(key), len(seen)) > 0 and common / min(len(key), len(seen)) > 0.8:
-                    is_duplicate = True
+        # 清洗：移除标点符号，保留中文、英文、数字
+        clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', title)
+        is_dup = False
+        for seen in seen_titles:
+            seen_clean = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', seen)
+            if clean and seen_clean:
+                ratio = SequenceMatcher(None, clean, seen_clean).ratio()
+                if ratio > 0.75:
+                    is_dup = True
                     break
 
-        if not is_duplicate:
+        if not is_dup:
             unique_news.append(news)
-            seen_keys.append(key)
+            seen_titles.append(title)
 
     return unique_news
 

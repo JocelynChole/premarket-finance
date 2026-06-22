@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>历史档案 · {{ project_name }}</title>
+  <meta name="description" content="所有历史简报按日期归档，点击任一日期可回看当日完整分析报告">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 </head>
@@ -68,21 +69,48 @@
     setInterval(tick,1000); tick();
   </script>
   <script>
+    function escapeHtml(s){if(s==null)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
     async function loadHistory() {
       const c = document.getElementById('timelineWrap');
+      const userSendkey = localStorage.getItem('pms_sendkey') || '';
       try {
-        const resp = await fetch('/api/history');
-        const items = await resp.json();
-        if (!items.length) {
-          c.innerHTML = '<div class="empty"><span class="empty__icon">∅</span><div class="empty__title">暂无历史报告</div><div class="empty__sub">完成至少一次抓取后，历史报告会自动归档到这里</div></div>';
-          return;
+        const [histResp, pushResp] = await Promise.all([
+          fetch('/api/history'),
+          userSendkey ? fetch(`/api/my-pushes?sendkey=${encodeURIComponent(userSendkey)}`) : Promise.resolve(null)
+        ]);
+        const items = await histResp.json();
+        const pushes = pushResp ? await pushResp.json() : [];
+
+        let html = '';
+
+        // 令牌方案：我的推送记录
+        if (pushes && pushes.length > 0) {
+          html += `<div style="margin-bottom: 32px;">
+            <div style="font-size: 13px; color: var(--gold, #c9a86a); margin-bottom: 12px; letter-spacing: 0.05em;">📌 我的推送记录</div>
+            <div class="timeline">
+              ${pushes.map(p => `
+                <div class="timeline__item" style="text-decoration: none; color: inherit; display: block;">
+                  <span class="timeline__date">${escapeHtml(p.date)}</span>
+                  <span class="timeline__sub">${p.success ? '✅' : '❌'} ${escapeHtml(String(p.news_count))} 条 · ${escapeHtml(p.sectors.join(' · '))}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>`;
         }
-        c.innerHTML = '<div class="timeline">' + items.map(item => `
-          <a class="timeline__item" href="/api/report/date/${item.date}/markdown" target="_blank" style="text-decoration: none; color: inherit; display: block;">
-            <span class="timeline__date">${item.formatted_date.replace(/-/g, ' · ')}</span>
-            <span class="timeline__sub">DISPATCH №${item.date} · ${Math.round(item.size / 1024)} KB</span>
-          </a>
-        `).join('') + '</div>';
+
+        // 全部历史档案
+        if (!items.length) {
+          html += '<div class="empty"><span class="empty__icon">∅</span><div class="empty__title">暂无历史报告</div><div class="empty__sub">完成至少一次抓取后，历史报告会自动归档到这里</div></div>';
+        } else {
+          html += '<div class="timeline">' + items.map(item => `
+            <a class="timeline__item" href="/api/report/date/${item.date}/markdown" target="_blank" style="text-decoration: none; color: inherit; display: block;">
+              <span class="timeline__date">${escapeHtml(item.formatted_date.replace(/-/g, ' · '))}</span>
+              <span class="timeline__sub">DISPATCH №${escapeHtml(item.date)} · ${escapeHtml(String(Math.round(item.size / 1024)))} KB</span>
+            </a>
+          `).join('') + '</div>';
+        }
+
+        c.innerHTML = html;
       } catch (e) {
         c.innerHTML = `<div class="empty"><span class="empty__icon">!</span><div class="empty__title">加载失败</div></div>`;
       }

@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ project_name }} · 今日速览</title>
+  <meta name="description" content="盘前财经资讯研判智能体 - T-1 15:00 到 T 09:30 自动研判盘前预测类资讯">
+  <meta property="og:title" content="盘前财经资讯研判智能体 · 今日速览">
+  <meta property="og:description" content="自动跟踪财经网站实时资讯，智能研判盘前预测类资讯">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 </head>
@@ -118,12 +121,6 @@
       </div>
 
       <div class="filterbar">
-        <div class="filterbar__group">
-          <span class="filterbar__label">日期</span>
-          <button class="pill is-active" data-date="all">全部</button>
-          <button class="pill" data-date="yesterday">前一日</button>
-          <button class="pill" data-date="today">当日</button>
-        </div>
         <div class="filterbar__group">
           <span class="filterbar__label">情绪</span>
           <button class="pill is-active" data-sentiment="all">全部</button>

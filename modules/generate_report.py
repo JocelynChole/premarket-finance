@@ -3,6 +3,7 @@
 盘前财经资讯助手 - 简报生成模块
 按照 output_spec.md 的格式生成结构化 Markdown 简报
 """
+import re
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict
 from collections import Counter
@@ -65,10 +66,16 @@ def generate_core_prediction(analyzed_news: List[Dict]) -> str:
     else:
         overall_sentiment = "中性"
 
+    # 主要分歧：同时存在利好和利空才有分歧
+    if bullish and bearish:
+        divergence = f"市场情绪存在分歧（利好 {bullish} / 利空 {bearish}）"
+    else:
+        divergence = "无显著分歧"
+
     return f"""### 一、核心预判
 
 - **机构共识**：{consensus}
-- **主要分歧**：{'无显著分歧' if bullish and bearish else '市场情绪存在一定分歧'}
+- **主要分歧**：{divergence}
 - **整体情绪**：{overall_sentiment}"""
 
 
@@ -91,9 +98,13 @@ def generate_sector_table(analyzed_news: List[Dict]) -> str:
 
         direction = "利好" if bullish > bearish else ("利空" if bearish > bullish else "中性")
 
-        # 找出代表性观点
+        # 找出代表性观点（修复时间截取：pub_time 格式 "2024-05-29 09:15" → 取 [11:16]）
         top_news = max(news_list, key=lambda x: x.get("importance_score", 0))
-        representative = f"{top_news.get('source', '')}({top_news.get('pub_time', '')[:5]})：{top_news.get('title', '')[:20]}..."
+        pub_time = top_news.get('pub_time', '')
+        time_str = pub_time[11:16] if len(pub_time) >= 16 else pub_time[:5]
+        title_full = top_news.get('title', '')
+        title_short = title_full[:20]
+        representative = f"{top_news.get('source', '')}({time_str})：{title_short}{'...' if len(title_full) > 20 else ''}"
 
         sector_data.append({
             "sector": sector,
@@ -124,15 +135,36 @@ def generate_sector_table(analyzed_news: List[Dict]) -> str:
 
 
 def generate_sector_logic(content: str) -> str:
-    """从内容中提取核心逻辑"""
+    """从内容中提取核心逻辑（增强版：优先找因果/预测句式，而非截前30字）"""
     if not content:
         return "详见资讯内容"
 
-    # 取内容的前30个字符
-    logic = content[:30].replace("\n", " ").strip()
-    if len(content) > 30:
-        logic += "..."
-    return logic
+    text = content.replace("\n", " ").strip()
+    # 按句号/分号拆成句子
+    sentences = re.split(r'[。；！？\n]', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if not sentences:
+        return text[:40] + ("..." if len(text) > 40 else "")
+
+    # 优先级 1：因果句式（由于/因为...导致/所以）
+    for s in sentences:
+        if re.search(r'(由于|因为|因).{2,}(导致|使得|促使|带动|推动|所以|因此)', s):
+            return s[:50] + ("..." if len(s) > 50 else "")
+
+    # 优先级 2：预测性表述（预计/有望/建议关注/看好/目标价/维持评级）
+    for s in sentences:
+        if re.search(r'(预计|有望|建议关注|看好|目标价|维持.*评级|上调|下调|渗透率|景气|拐点|需求.*增长|供给.*收缩)', s):
+            return s[:50] + ("..." if len(s) > 50 else "")
+
+    # 优先级 3：含数字+趋势词的句子（增长X%/突破X亿/达到X）
+    for s in sentences:
+        if re.search(r'\d+[%亿万]?', s) and re.search(r'(增长|下降|突破|达到|超过|提升|降低|扩张|收缩)', s):
+            return s[:50] + ("..." if len(s) > 50 else "")
+
+    # 优先级 4：最长的句子（信息量最大）
+    longest = max(sentences, key=len)
+    return longest[:50] + ("..." if len(longest) > 50 else "")
 
 
 def generate_key_news_table(analyzed_news: List[Dict]) -> str:
@@ -151,7 +183,8 @@ def generate_key_news_table(analyzed_news: List[Dict]) -> str:
 """
     table_rows = ""
     for news in opinion_news[:10]:  # 只显示前10条
-        time_str = news.get("pub_time", "")[:5] if news.get("pub_time") else ""
+        pub_time = news.get("pub_time", "")
+        time_str = pub_time[11:16] if len(pub_time) >= 16 else pub_time[:5]
         source = news.get("source", "")
         title = news.get("title", "")[:25]
         sectors = "、".join(news.get("sectors", [])[:2])
@@ -169,31 +202,86 @@ def generate_fact_reference(analyzed_news: List[Dict]) -> str:
 
 
 def generate_risk_warning(analyzed_news: List[Dict]) -> str:
-    """生成风险提示"""
-    warnings = []
+    """生成风险提示（增强版：列出高重要性资讯 + 板块风险 + 情绪风险）"""
+    lines = ["### 四、风险提示", ""]
 
-    # 根据资讯内容生成风险提示
+    # ====== 1. 高重要性资讯逐条提醒 ======
+    high_imp_news = [n for n in analyzed_news if n.get("importance_score", 0) >= 8]
+    high_imp_news.sort(key=lambda x: x.get("importance_score", 0), reverse=True)
+
+    if high_imp_news:
+        lines.append(f"**⚠️ 高重要性资讯（{len(high_imp_news)} 条）需重点关注：**")
+        lines.append("")
+        for i, news in enumerate(high_imp_news[:5], 1):  # 最多列 5 条
+            title = news.get("title", "")[:40]
+            sectors = "、".join(news.get("sectors", [])[:2]) or "未分类"
+            sentiment = news.get("sentiment", "中性")
+            score = news.get("importance_score", 0)
+            source = news.get("source", "")
+            advice = news.get("advice", "")
+
+            # 根据情绪生成具体风险提示
+            if sentiment == "利空":
+                risk_hint = f"注意规避{sectors}板块回调风险"
+            elif sentiment == "利好":
+                risk_hint = f"关注{sectors}板块追涨风险，谨防冲高回落"
+            else:
+                risk_hint = f"关注{sectors}板块后续方向选择"
+
+            lines.append(f"{i}. **[{sentiment} · {score}分]** {title}")
+            lines.append(f"   - 涉及板块：{sectors} · 来源：{source}")
+            lines.append(f"   - 风险提示：{risk_hint}")
+            if advice:
+                lines.append(f"   - 操作建议：{advice}")
+            lines.append("")
+
+    # ====== 2. 板块集中度风险 ======
+    sector_counter = Counter()
+    sector_bearish = Counter()
+    for news in analyzed_news:
+        for s in news.get("sectors", []):
+            sector_counter[s] += 1
+            if news.get("sentiment") == "利空":
+                sector_bearish[s] += 1
+
+    # 找利空占比高的板块
+    risky_sectors = []
+    for sector, total in sector_counter.most_common(5):
+        bear_count = sector_bearish.get(sector, 0)
+        if bear_count >= 2 and bear_count / total >= 0.5:
+            risky_sectors.append((sector, bear_count, total))
+
+    if risky_sectors:
+        lines.append("**📉 板块风险预警：**")
+        lines.append("")
+        for sector, bear, total in risky_sectors:
+            lines.append(f"- **{sector}**：{bear}/{total} 条利空，利空占比 {bear/total*100:.0f}%，短期承压")
+        lines.append("")
+
+    # ====== 3. 情绪极端风险 ======
     sentiments = [n.get("sentiment", "中性") for n in analyzed_news]
+    bullish = sentiments.count("利好")
     bearish = sentiments.count("利空")
+    total = len(analyzed_news)
 
-    if bearish > 2:
-        warnings.append("今日利空资讯较多，注意规避相关风险")
+    if total > 0:
+        bear_ratio = bearish / total
+        if bear_ratio > 0.5:
+            lines.append(f"**⚠️ 整体情绪偏空**：利空占比 {bear_ratio*100:.0f}%（{bearish}/{total}），建议谨慎操作、控制仓位")
+            lines.append("")
+        elif bullish > 0 and bearish > 0 and abs(bullish - bearish) <= 2:
+            lines.append(f"**⚠️ 多空分歧明显**：利好 {bullish} vs 利空 {bearish}，市场方向不明确，建议观望")
+            lines.append("")
 
-    # 检查重要时间点
-    important_news = [n for n in analyzed_news if n.get("importance_score", 0) >= 8]
-    if important_news:
-        warnings.append(f"今日有 {len(important_news)} 条高重要性资讯，需重点关注")
+    # ====== 4. 数据局限性提示 ======
+    if not high_imp_news:
+        lines.append("**ℹ️ 今日无高重要性（≥8分）资讯**，市场整体平稳，按常规策略操作。")
+        lines.append("")
 
-    if not warnings:
-        warnings.append("市场整体平稳，未发现明显风险点")
+    lines.append("---")
+    lines.append("*⚠️ 本分析仅基于公开资讯自动生成，不构成任何投资建议。市场有风险，投资需谨慎。*")
 
-    warnings.append("本分析仅基于公开资讯，不构成任何投资建议")
-
-    warning_items = "\n".join([f"{i+1}. {w}" for i, w in enumerate(warnings)])
-
-    return f"""### 五、风险提示
-
-{warning_items}"""
+    return "\n".join(lines)
 
 
 def generate_markdown_report(analyzed_news: List[Dict], date_str: str = None) -> str:

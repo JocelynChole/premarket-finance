@@ -95,6 +95,11 @@ FLASK_HOST = "0.0.0.0"
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
 
+# 生产环境安全检查：debug 模式不应在公网开放
+if FLASK_DEBUG and FLASK_HOST == "0.0.0.0":
+    import warnings
+    warnings.warn("⚠️ FLASK_DEBUG=1 在公网环境（0.0.0.0）可能泄露代码和栈信息，建议仅本地使用")
+
 # ============== 项目元信息 ==============
 PROJECT_NAME = "盘前财经资讯研判智能体"
 PROJECT_VERSION = "1.0.0"
