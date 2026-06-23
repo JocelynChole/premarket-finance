@@ -1,0 +1,88 @@
+# =====================================================================
+# 每日 9:25 自动推送盘前简报（A 股交易日 = 周一至周五）
+# 原理：GitHub Actions 定时触发 → 唤醒 Render → 抓取/分析/推送
+# 优势：完全免费、稳定，不受 Render 免费层 15 分钟休眠影响
+# =====================================================================
+
+name: 每日 9:25 盘前简报推送
+
+# 触发器（用引号包裹 "on" 避免 YAML 1.1 把它解析成布尔值 True）
+"on":
+  # 定时触发：UTC 01:25 = 北京时间 09:25（周一至周五）
+  schedule:
+    - cron: '25 1 * * 1-5'
+  # 手动触发：方便调试和补推
+  workflow_dispatch:
+
+jobs:
+  daily-push:
+    runs-on: ubuntu-latest
+    # A 股交易日：周一至周五（北京时间）
+    # 注：GitHub cron 本身不支持节假日判断，春节/国庆期间可手动 disable workflow
+
+    steps:
+      # -------------------------------------------------------------
+      # 第 1 步：调用 /api/refresh 生成今日简报
+      # -------------------------------------------------------------
+      - name: ① 刷新并生成今日简报
+        run: |
+          echo "▶ 触发 /api/refresh（冷启动可能需要 30-50 秒）"
+          HTTP_CODE=$(curl -X POST "$RENDER_URL/api/refresh" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --max-time 180 \
+            -s -o /tmp/refresh.json -w "%{http_code}")
+          echo "  状态码: $HTTP_CODE"
+          echo "  返回内容:"
+          cat /tmp/refresh.json | head -c 500
+          echo ""
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ 刷新失败，停止推送"
+            exit 1
+          fi
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+
+      # -------------------------------------------------------------
+      # 第 2 步：等待报告保存到本地
+      # -------------------------------------------------------------
+      - name: ② 等待 5 秒确保报告落盘
+        run: sleep 5
+
+      # -------------------------------------------------------------
+      # 第 3 步：调用 /api/send/all 推送给所有订阅者
+      # -------------------------------------------------------------
+      - name: ③ 推送给所有订阅者
+        run: |
+          echo "▶ 触发 /api/send/all"
+          HTTP_CODE=$(curl -X POST "$RENDER_URL/api/send/all" \
+            -H "X-Admin-Token: $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --max-time 180 \
+            -s -o /tmp/send.json -w "%{http_code}")
+          echo "  状态码: $HTTP_CODE"
+          echo "  返回内容:"
+          cat /tmp/send.json
+          echo ""
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "⚠️ 推送失败，但 cron 已执行"
+            exit 0  # 不让 workflow 失败，避免邮件告警噪音
+          fi
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+
+      # -------------------------------------------------------------
+      # 第 4 步：输出执行总结
+      # -------------------------------------------------------------
+      - name: ④ 执行总结
+        if: always()
+        run: |
+          echo "=========================="
+          echo "✅ GitHub Actions 执行完成"
+          echo "  时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "  对应北京时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
+          echo "=========================="
