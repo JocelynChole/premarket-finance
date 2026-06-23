@@ -116,8 +116,18 @@ def _ensure_rss_running():
     return _rss_proc
 
 
-# 模块加载时立即尝试启动 RSS（gunicorn / python app.py 都会触发）
-_ensure_rss_running()
+# 模块加载时**异步**启动 RSS，避免阻塞 gunicorn 启动
+# Render 健康检查默认 60 秒超时，RSS 启动最多 10 秒轮询
+# 用 daemon 线程启动后立即返回，确保 gunicorn 立即接管端口
+def _async_ensure_rss():
+    try:
+        _ensure_rss_running()
+    except Exception as e:
+        print(f"[RSS] 异步启动失败（不影响服务）: {e}")
+
+
+_rss_thread = threading.Thread(target=_async_ensure_rss, daemon=True, name="rss-bootstrap")
+_rss_thread.start()
 
 
 # ============== APScheduler 定时任务（Render 单进程跑用） ==============
@@ -146,49 +156,64 @@ def _start_scheduler():
     设计原则：只保留 9:25 自动推送，8:30 任务已去掉
     - 9:25 之前没数据是正常的（用户需要主动刷新或订阅推送触发）
     - 避免 8:30 任务在 Render 休眠时失效导致"假阴性"
+
+    关键：整个函数用 try/except 包裹，绝不让 APScheduler 启动失败导致 gunicorn 崩溃
     """
-    if _scheduler.running:
-        return
+    try:
+        if _scheduler.running:
+            return
 
-    from config import PUSH_TIME
-    ph, pm = PUSH_TIME.split(":")
+        from config import PUSH_TIME
+        ph, pm = PUSH_TIME.split(":")
 
-    _scheduler.add_job(
-        job_push,
-        CronTrigger(hour=int(ph), minute=int(pm), timezone="Asia/Shanghai"),
-        id="push_wechat",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+        _scheduler.add_job(
+            job_push,
+            CronTrigger(hour=int(ph), minute=int(pm), timezone="Asia/Shanghai"),
+            id="push_wechat",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
 
-    # 自 ping 保活：每 10 分钟请求自身，防止 Render 免费层休眠
-    _scheduler.add_job(
-        _self_ping,
-        'interval',
-        minutes=10,
-        id="self_ping",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+        # 自 ping 保活：每 10 分钟请求自身，防止 Render 免费层休眠
+        _scheduler.add_job(
+            _self_ping,
+            'interval',
+            minutes=10,
+            id="self_ping",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
 
-    _scheduler.start()
-    print(f"[SCHEDULER] APScheduler 已启动（时区 Asia/Shanghai）")
-    print(f"  · {PUSH_TIME}  推送微信（提前重抓一次确保资讯最新）")
-    print(f"  · 每 10 分钟  自 ping 保活（防 Render 休眠）")
-    print(f"  · 其他时段：用户点击刷新 + 已订阅时，推送至该用户")
+        _scheduler.start()
+        print(f"[SCHEDULER] APScheduler 已启动（时区 Asia/Shanghai）")
+        print(f"  · {PUSH_TIME}  推送微信（提前重抓一次确保资讯最新）")
+        print(f"  · 每 10 分钟  自 ping 保活（防 Render 休眠）")
+        print(f"  · 其他时段：用户点击刷新 + 已订阅时，推送至该用户")
+    except Exception as e:
+        # 调度器启动失败不影响 Web 服务
+        print(f"[SCHEDULER] 启动失败（Web 服务继续运行）: {e}")
 
 
 _start_scheduler()
 
 
 # ============== 持久化：启动时从 GitHub 恢复数据 ==============
+# 关键：GitHub API 调用必须用 try/except 保护，绝不能让网络问题阻塞 gunicorn 启动
 print(f"[PERSIST] GitHub 持久化：{persistence_status()}")
 if PERSISTENCE_ENABLED:
-    # 启动时从 GitHub 恢复 subscribers.json 和 push_log.json
-    sync_github_to_local("data/subscribers.json", SUBSCRIBERS_FILE)
-    sync_github_to_local("data/push_log.json", DATA_DIR / "push_log.json")
+    def _async_sync_from_github():
+        """启动时从 GitHub 恢复数据，失败不影响 Web 服务"""
+        try:
+            sync_github_to_local("data/subscribers.json", SUBSCRIBERS_FILE)
+            sync_github_to_local("data/push_log.json", DATA_DIR / "push_log.json")
+        except Exception as e:
+            print(f"[PERSIST] 启动时从 GitHub 恢复数据失败（不影响服务）: {e}")
+
+    # 异步执行，不阻塞 gunicorn 启动
+    _persist_thread = threading.Thread(target=_async_sync_from_github, daemon=True, name="persist-bootstrap")
+    _persist_thread.start()
 
 
 # ============== 辅助函数 ==============
