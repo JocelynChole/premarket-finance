@@ -152,9 +152,15 @@ def sync_github_to_local(repo_path: str, local_path: Path) -> bool:
     if not PERSISTENCE_ENABLED:
         return False
 
-    # 本地已有数据就不覆盖
+    # 本地已有有效数据就不覆盖（Render 重启后文件可能存在但 size=0）
     if local_path.exists() and local_path.stat().st_size > 0:
-        return False
+        try:
+            with open(local_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if content:
+                    return False  # 已有真实数据，不覆盖
+        except OSError:
+            pass
 
     content = load_from_github(repo_path)
     if content is None:

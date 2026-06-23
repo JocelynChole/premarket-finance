@@ -212,16 +212,26 @@ if PERSISTENCE_ENABLED:
 # ============== 辅助函数 ==============
 
 def _load_subscribers():
+    # 先尝试本地文件
     if SUBSCRIBERS_FILE.exists():
         try:
             with open(SUBSCRIBERS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return []
-    # 本地不存在时尝试从 GitHub 拉取
+                content = f.read().strip()
+                if content:  # 文件非空
+                    return json.loads(content)
+        except (json.JSONDecodeError, OSError):
+            pass
+    # 本地为空/不存在/解析失败 → 尝试从 GitHub 拉取
     if PERSISTENCE_ENABLED:
         data = load_json_from_github("data/subscribers.json")
         if data is not None:
+            # 立即写回本地，避免下次再走网络
+            try:
+                SUBSCRIBERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                with open(SUBSCRIBERS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            except OSError:
+                pass
             return data
     return []
 
