@@ -116,18 +116,9 @@ def _ensure_rss_running():
     return _rss_proc
 
 
-# 模块加载时**异步**启动 RSS，避免阻塞 gunicorn 启动
-# Render 健康检查默认 60 秒超时，RSS 启动最多 10 秒轮询
-# 用 daemon 线程启动后立即返回，确保 gunicorn 立即接管端口
-def _async_ensure_rss():
-    try:
-        _ensure_rss_running()
-    except Exception as e:
-        print(f"[RSS] 异步启动失败（不影响服务）: {e}")
-
-
-_rss_thread = threading.Thread(target=_async_ensure_rss, daemon=True, name="rss-bootstrap")
-_rss_thread.start()
+# RSS 自启已取消：Render 上不需要（也没法用）RSS 子进程
+# 推送功能通过 send_wechat.py 直接调用 Server 酱 API，不需要本地 RSS
+# 如需抓取资讯，请用户主动点击刷新或使用订阅推送功能
 
 
 # ============== APScheduler 定时任务（Render 单进程跑用） ==============
@@ -196,7 +187,9 @@ def _start_scheduler():
         print(f"[SCHEDULER] 启动失败（Web 服务继续运行）: {e}")
 
 
-_start_scheduler()
+# Scheduler 启动已取消：Render 免费层 15 分钟休眠，APScheduler 经常失效
+# 改为：用户主动点击刷新 / 订阅推送时执行，不依赖后台调度
+# 取消模块加载时的副作用，确保 gunicorn 启动零阻塞
 
 
 # ============== 持久化：启动时从 GitHub 恢复数据 ==============
