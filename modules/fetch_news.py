@@ -209,20 +209,48 @@ def check_rss_service() -> bool:
 
 
 def fetch_all_news() -> List[Dict]:
-    """从所有来源抓取资讯（单个源失败不影响其他源）"""
+    """从所有来源抓取资讯（单个源失败不影响其他源）
+
+    直接调用 china-finance-rss/server.py 里的 handler 函数，
+    不通过 HTTP 桥接层，省掉子进程 + 端口 + HTTP 解析。
+
+    旧逻辑：requests.get("http://localhost:8053/...") 依赖 RSS 子进程
+    新逻辑：直接 import 抓取函数，零外部依赖
+    """
     all_news = []
 
-    # 先检查服务是否可用
-    if not check_rss_service():
-        print("⚠️ china-finance-rss 服务未启动！")
-        print("   请先在另一个终端运行：")
-        print("   cd china-finance-rss && python server.py")
-        print("")
+    # 直接调用 china-finance-rss 桥接服务的抓取函数
+    # 这些函数返回标准 RSS 2.0 XML 字符串，与 HTTP 模式完全等价
+    handlers = []
+    try:
+        import sys
+        from pathlib import Path
+        rss_dir = Path(__file__).parent.parent / "china-finance-rss"
+        if str(rss_dir) not in sys.path:
+            sys.path.insert(0, str(rss_dir))
+        # server.py 里的 /cls/telegraph 实际指向 handle_sina_kuaixun
+        from server import handle_sina_kuaixun, handle_eastmoney_kuaixun, handle_ths_kuaixun
+        handlers = [
+            ("新浪财经", handle_sina_kuaixun),
+            ("东方财富", handle_eastmoney_kuaixun),
+            ("同花顺", handle_ths_kuaixun),
+        ]
+    except Exception as e:
+        print(f"[FETCH] 加载 china-finance-rss handler 失败: {e}")
         return all_news
 
-    for source_name, url in RSS_ENDPOINTS.items():
-        news_list = fetch_from_rss(source_name, url)
-        all_news.extend(news_list)
+    for source_name, handler in handlers:
+        try:
+            xml_content = handler()
+            if not xml_content:
+                print(f"  {source_name}：返回空内容，跳过")
+                continue
+            news_list = parse_rss_xml(xml_content, source_name)
+            print(f"  {source_name}：获取到 {len(news_list)} 条")
+            all_news.extend(news_list)
+        except Exception as e:
+            print(f"  {source_name}：抓取失败 ({e})，跳过")
+            continue
 
     # 按时间戳排序（最新的在前）
     all_news.sort(key=lambda x: x.get("pub_timestamp", 0), reverse=True)
