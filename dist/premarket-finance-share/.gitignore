@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 数据文件
+data/reports/*.json
+data/markdown_reports/*.md
+data/subscribers.json
+*.log
+
+# 环境变量
+.env
+
+# 第三方服务（Render 部署时需要源码进仓库，所以不再整体忽略）
+# 注意：china-finance-rss 目录会被推到 GitHub（确保 Render 容器能跑）
+china-finance-rss/__pycache__/
+china-finance-rss/.git/
+china-finance-rss/data/
+
+# 反向撤销的基线备份（仅本地保留，不要推到仓库）
+_restore_baseline/
+_restore_baseline/**
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.bak
+
+# 阿里云函数计算 ZIP 包（本地打包产物，不进仓库）
+aliyun-fc-pusher.zip
+aliyun-fc-pusher/python/
+ 
+# �����ļ������Ƶ��ֿ⣩
+_test_tz.py
+premarket-live/
+_test_scheduler2.py

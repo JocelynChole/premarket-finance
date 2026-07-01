@@ -1,0 +1,23 @@
+# 盘前财经资讯研判智能体 - Python 依赖
+# 安装命令: pip install -r requirements.txt
+
+# Web 框架
+flask>=2.0.0,<4.0.0
+
+# 生产环境 WSGI 服务器（Render 部署用）
+gunicorn>=21.0.0,<24.0.0
+
+# HTTP 请求 + RSS 抓取
+requests>=2.28.0,<3.0.0
+
+# 定时任务（Render 进程内调度用）
+apscheduler>=3.10.0,<4.0.0
+
+# 自动加载 .env 文件（可选）
+python-dotenv>=0.19.0,<2.0.0
+
+# XML 安全解析（防 XXE 攻击，可选）
+defusedxml>=0.7.0,<1.0.0
+
+# 中国法定节假日判断（可选，未安装则只跳周末）
+chinese-calendar>=1.9.0,<2.0.0
